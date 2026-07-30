@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "nandubay-web",
+      "runtimeExecutable": "D:\\RODOLFO_2025\\ÑANDUBAY\\dev-server.cmd",
+      "runtimeArgs": [],
+      "port": 3000
+    }
+  ]
+}
