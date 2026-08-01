@@ -38,11 +38,16 @@ export default async function LoginPage({
             className="rounded-xl border border-black/10 px-4 py-3 outline-blue-mid"
           />
           <PasswordInput name="password" placeholder="Contraseña" />
-          {error && (
+          {error === "conexion" ? (
+            <p className="text-sm font-semibold text-orange">
+              No pudimos conectarnos al servidor de datos. No es tu contraseña:
+              volvé a intentar en unos minutos.
+            </p>
+          ) : error ? (
             <p className="text-sm font-semibold text-orange">
               Usuario o contraseña incorrectos.
             </p>
-          )}
+          ) : null}
           <button
             type="submit"
             className="rounded-full bg-green-mid py-3 font-bold text-white hover:bg-green-dark"

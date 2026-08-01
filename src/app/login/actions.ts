@@ -12,18 +12,22 @@ import { registrarAuditoria } from "@/lib/auditoria";
 async function resolverEmail(usuarioIngresado: string): Promise<string | null> {
   const admin = createAdminClient();
 
-  const { data: porUsuario } = await admin
+  const { data: porUsuario, error: errorUsuario } = await admin
     .from("usuarios")
     .select("email")
     .eq("usuario", usuarioIngresado)
     .maybeSingle();
+  // Un fallo de red o de credenciales del servidor no es "usuario inexistente".
+  // Se propaga para no disfrazarlo de contraseña incorrecta.
+  if (errorUsuario) throw new Error(`No se pudo consultar usuarios: ${errorUsuario.message}`);
   if (porUsuario) return porUsuario.email;
 
-  const { data: porEmail } = await admin
+  const { data: porEmail, error: errorEmail } = await admin
     .from("usuarios")
     .select("email")
     .eq("email", usuarioIngresado)
     .maybeSingle();
+  if (errorEmail) throw new Error(`No se pudo consultar usuarios: ${errorEmail.message}`);
   return porEmail?.email ?? null;
 }
 
@@ -31,7 +35,16 @@ export async function signIn(formData: FormData) {
   const usuarioIngresado = String(formData.get("usuario"));
   const password = String(formData.get("password"));
 
-  const email = await resolverEmail(usuarioIngresado);
+  let email: string | null;
+  try {
+    email = await resolverEmail(usuarioIngresado);
+  } catch (e) {
+    // El servidor no pudo hablar con Supabase. Se distingue de una
+    // contraseña equivocada para no mandar a la usuaria a probar claves.
+    console.error("[login] fallo de conexión al resolver el usuario:", e);
+    redirect("/login?error=conexion");
+  }
+
   if (!email) {
     redirect("/login?error=1");
   }
@@ -43,6 +56,7 @@ export async function signIn(formData: FormData) {
   });
 
   if (error || !data.user) {
+    console.error("[login] signInWithPassword falló:", error?.message);
     redirect("/login?error=1");
   }
 
