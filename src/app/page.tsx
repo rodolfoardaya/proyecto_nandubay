@@ -37,6 +37,7 @@ const equipo = [
 ];
 
 export default function Home() {
+  // Deployed to Vercel
   return (
     <>
       <Navbar />
