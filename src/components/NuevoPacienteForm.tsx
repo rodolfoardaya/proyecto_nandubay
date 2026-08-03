@@ -19,7 +19,16 @@ export function NuevoPacienteForm({ tipo, secciones }: Props) {
   const [ocrError, setOcrError] = useState<string | null>(null);
   const [leido, setLeido] = useState(false);
 
-  const [paciente, setPaciente] = useState({ nombre: "", dni: "", fecha_nacimiento: "" });
+  // El apellido y el nombre se cargan por separado, como en la planilla en
+  // papel, pero se guardan juntos en `pacientes.nombre` (que es lo que ven
+  // los listados, ordenados por apellido).
+  const [paciente, setPaciente] = useState({
+    apellido: "",
+    nombre: "",
+    dni: "",
+    fecha_nacimiento: "",
+  });
+  const nombreCompleto = `${paciente.apellido} ${paciente.nombre}`.trim();
   const [datos, setDatos] = useState<DatosFicha>({});
   const [acuerdoValores, setAcuerdoValores] = useState<ValoresAcuerdo>({
     valor_sesion: "",
@@ -64,8 +73,11 @@ export function NuevoPacienteForm({ tipo, secciones }: Props) {
         return;
       }
 
+      // La lectura automática devuelve el nombre completo en una sola línea:
+      // se deja entero en Apellido para que la TO lo separe al revisar.
       setPaciente({
-        nombre: data.nombre || "",
+        apellido: (data.nombre || "").toUpperCase(),
+        nombre: "",
         dni: data.dni || "",
         fecha_nacimiento: data.fecha_nacimiento || "",
       });
@@ -140,12 +152,23 @@ export function NuevoPacienteForm({ tipo, secciones }: Props) {
       {/* Datos personales */}
       <section className="grid gap-3 rounded-2xl bg-white p-5 shadow-sm">
         <p className="font-bold text-green-dark">Datos personales</p>
+        {/* Lo que se guarda es el nombre completo; los dos campos de arriba
+            son sólo la forma de cargarlo. */}
+        <input type="hidden" name="nombre" value={nombreCompleto} />
         <input
           required
-          name="nombre"
-          placeholder="Nombre y apellido"
+          placeholder="Apellido"
+          value={paciente.apellido}
+          onChange={(e) =>
+            setPaciente({ ...paciente, apellido: e.target.value.toUpperCase() })
+          }
+          className="rounded-xl border border-black/10 px-4 py-3 outline-blue-mid"
+        />
+        <input
+          required
+          placeholder="Nombre"
           value={paciente.nombre}
-          onChange={(e) => setPaciente({ ...paciente, nombre: e.target.value })}
+          onChange={(e) => setPaciente({ ...paciente, nombre: e.target.value.toUpperCase() })}
           className="rounded-xl border border-black/10 px-4 py-3 outline-blue-mid"
         />
         <input

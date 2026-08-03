@@ -1,6 +1,16 @@
 "use client";
 
-import { SEPARADOR_MULTI, type Campo, type DatosFicha, type Seccion } from "@/lib/ficha-fields";
+import {
+  SEPARADOR_MULTI,
+  keyDeOpcion,
+  type Campo,
+  type DatosFicha,
+  type Seccion,
+} from "@/lib/ficha-fields";
+
+// La planilla del consultorio se completa en mayúsculas, así que todo lo que
+// se tipea se convierte al vuelo y no queda a criterio de quien carga.
+const enMayusculas = (s: string) => s.toUpperCase();
 
 // Renderiza los ítems de una planilla respetando el tipo de cada uno en la
 // versión en papel: campos de una línea, párrafos libres, opciones a marcar
@@ -33,12 +43,16 @@ function ItemCampo({
   observacion,
   onValor,
   onObservacion,
+  obsDeOpcion,
+  onObsDeOpcion,
 }: {
   campo: Campo;
   valor: string;
   observacion: string;
   onValor: (valor: string) => void;
   onObservacion: (observacion: string) => void;
+  obsDeOpcion: (opcion: string) => string;
+  onObsDeOpcion: (opcion: string, observacion: string) => void;
 }) {
   const tipo = campo.tipo ?? "textarea";
   const seleccionadas = tipo === "multi" ? marcadas(valor) : [];
@@ -64,7 +78,7 @@ function ItemCampo({
           <input
             name={campo.key}
             value={valor}
-            onChange={(e) => onValor(e.target.value)}
+            onChange={(e) => onValor(enMayusculas(e.target.value))}
             className={INPUT}
           />
         </label>
@@ -77,7 +91,7 @@ function ItemCampo({
             name={campo.key}
             rows={2}
             value={valor}
-            onChange={(e) => onValor(e.target.value)}
+            onChange={(e) => onValor(enMayusculas(e.target.value))}
             className={INPUT}
           />
         </label>
@@ -87,27 +101,64 @@ function ItemCampo({
         <fieldset>
           <legend className="text-xs font-semibold text-foreground/70">{campo.label}</legend>
           <input type="hidden" name={campo.key} value={valor} />
-          <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1">
-            {(campo.opciones ?? []).map((opcion) => (
-              <label
-                key={opcion}
-                className="flex items-center gap-1.5 text-sm font-normal text-foreground"
-              >
-                <input
-                  type={tipo === "opcion" ? "radio" : "checkbox"}
-                  name={`${campo.key}__opt`}
-                  value={opcion}
-                  checked={tipo === "opcion" ? valor === opcion : seleccionadas.includes(opcion)}
-                  onChange={() =>
-                    tipo === "opcion"
-                      ? onValor(valor === opcion ? "" : opcion)
-                      : toggleMulti(opcion)
-                  }
-                />
-                {opcion}
-              </label>
-            ))}
-          </div>
+
+          {campo.observacionPorOpcion ? (
+            // Cada opción con su propia observación al lado, en filas, porque
+            // la aclaración corresponde al ítem puntual y no al conjunto.
+            <div className="mt-1 grid gap-1.5">
+              {(campo.opciones ?? []).map((opcion, i) => {
+                const marcada =
+                  tipo === "opcion" ? valor === opcion : seleccionadas.includes(opcion);
+                return (
+                  <div key={opcion} className="flex flex-wrap items-center gap-2">
+                    <label className="flex w-52 shrink-0 items-center gap-1.5 text-sm font-normal text-foreground">
+                      <input
+                        type={tipo === "opcion" ? "radio" : "checkbox"}
+                        name={`${campo.key}__opt`}
+                        value={opcion}
+                        checked={marcada}
+                        onChange={() =>
+                          tipo === "opcion"
+                            ? onValor(valor === opcion ? "" : opcion)
+                            : toggleMulti(opcion)
+                        }
+                      />
+                      {opcion}
+                    </label>
+                    <input
+                      name={`${campo.key}__obs__${i}`}
+                      value={obsDeOpcion(opcion)}
+                      onChange={(e) => onObsDeOpcion(opcion, enMayusculas(e.target.value))}
+                      placeholder="Observaciones"
+                      className="min-w-48 flex-1 rounded-xl border border-black/10 px-3 py-2 text-xs font-normal text-foreground outline-blue-mid"
+                    />
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1">
+              {(campo.opciones ?? []).map((opcion) => (
+                <label
+                  key={opcion}
+                  className="flex items-center gap-1.5 text-sm font-normal text-foreground"
+                >
+                  <input
+                    type={tipo === "opcion" ? "radio" : "checkbox"}
+                    name={`${campo.key}__opt`}
+                    value={opcion}
+                    checked={tipo === "opcion" ? valor === opcion : seleccionadas.includes(opcion)}
+                    onChange={() =>
+                      tipo === "opcion"
+                        ? onValor(valor === opcion ? "" : opcion)
+                        : toggleMulti(opcion)
+                    }
+                  />
+                  {opcion}
+                </label>
+              ))}
+            </div>
+          )}
         </fieldset>
       )}
 
@@ -117,7 +168,7 @@ function ItemCampo({
           <input
             name={`${campo.key}__obs`}
             value={observacion}
-            onChange={(e) => onObservacion(e.target.value)}
+            onChange={(e) => onObservacion(enMayusculas(e.target.value))}
             placeholder="Aclaraciones sobre este ítem (opcional)"
             className="mt-1 w-full rounded-xl border border-black/10 px-3 py-2 text-xs font-normal text-foreground outline-blue-mid"
           />
@@ -146,6 +197,8 @@ export function CamposFicha({ secciones, datos, onValor, onObservacion }: Props)
               observacion={datos[campo.key]?.observacion ?? ""}
               onValor={(valor) => onValor(campo.key, valor)}
               onObservacion={(obs) => onObservacion(campo.key, obs)}
+              obsDeOpcion={(opcion) => datos[keyDeOpcion(campo.key, opcion)]?.observacion ?? ""}
+              onObsDeOpcion={(opcion, obs) => onObservacion(keyDeOpcion(campo.key, opcion), obs)}
             />
           ))}
         </section>

@@ -8,6 +8,7 @@ import { Faq } from "@/components/Faq";
 import { ContactForm } from "@/components/ContactForm";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
+import { ACTIVIDADES, portadaDe } from "@/lib/galeria";
 
 const servicios = [
   // Atención presencial
@@ -23,14 +24,20 @@ const servicios = [
   { titulo: "Organización de rutinas y actividades", modo: "Online" },
 ];
 
+// Las fotos son archivos estáticos en /public/equipo/. Van así y no desde el
+// bucket de Storage porque esta página es pública y las URLs firmadas vencen.
 const equipo = [
   {
     nombre: "Fundadora Lic. Romina Gabriela Ardaya",
+    // El nombre va exacto como está el archivo: el servidor es Linux y
+    // distingue mayúsculas de minúsculas.
+    foto: "/equipo/ROMINA.jpeg",
     frase:
       "Creo profundamente en el potencial de cada niño, en sus tiempos, en su singularidad, y en el poder del vínculo como motor de transformación.",
   },
   {
     nombre: "Lic. Rocío Terzaghi Paz",
+    foto: "/equipo/ROCIO.jpeg",
     frase:
       "Me gusta ser TO porque me gusta acompañar con pequeñas herramientas que hoy parecen simples, pero mañana construyen autonomía.",
   },
@@ -61,6 +68,12 @@ export default function Home() {
                 <a href="#servicios">
                   <Button variant="secondary">Conocer servicios</Button>
                 </a>
+                <Link href="/galeria/obras-sociales">
+                  <Button variant="secondary">Obras sociales</Button>
+                </Link>
+                <Link href="/galeria/recordatorio-para-las-familias">
+                  <Button variant="secondary">Recordatorio para las familias</Button>
+                </Link>
               </div>
             </div>
             <div className="flex justify-center">
@@ -104,12 +117,23 @@ export default function Home() {
             <div className="mt-10 grid gap-6 md:grid-cols-2">
               {equipo.map((p) => (
                 <Card key={p.nombre}>
-                  <p className="text-lg font-extrabold text-green-dark">
-                    {p.nombre}
-                  </p>
-                  <p className="mt-2 text-sm italic text-foreground/80">
-                    &ldquo;{p.frase}&rdquo;
-                  </p>
+                  <div className="flex flex-col items-center gap-4 sm:flex-row sm:items-start">
+                    <Image
+                      src={p.foto}
+                      alt={`Foto de ${p.nombre}`}
+                      width={128}
+                      height={128}
+                      className="h-32 w-32 shrink-0 rounded-full object-cover object-top ring-4 ring-green-light/50"
+                    />
+                    <div>
+                      <p className="text-lg font-extrabold text-green-dark">
+                        {p.nombre}
+                      </p>
+                      <p className="mt-2 text-sm italic text-foreground/80">
+                        &ldquo;{p.frase}&rdquo;
+                      </p>
+                    </div>
+                  </div>
                 </Card>
               ))}
             </div>
@@ -128,17 +152,34 @@ export default function Home() {
               Galería de actividades
             </h2>
             <p className="mx-auto mt-2 max-w-xl text-center text-sm text-foreground/70">
-              Fotos y videos generales de nuestras actividades. Próximamente
-              vas a poder ver más contenido acá.
+              Momentos de nuestros talleres y encuentros. Entrá a cada
+              actividad para ver todas las fotos.
             </p>
-            <div className="mt-10 grid grid-cols-2 gap-4 sm:grid-cols-4">
-              {Array.from({ length: 8 }).map((_, i) => (
-                <div
-                  key={i}
-                  className="aspect-square rounded-2xl bg-green-light/40"
-                />
+
+            <div className="mt-10 grid gap-6 sm:grid-cols-2">
+              {ACTIVIDADES.map((actividad) => (
+                <Link
+                  key={actividad.slug}
+                  href={`/galeria/${actividad.slug}`}
+                  className="group overflow-hidden rounded-2xl bg-white shadow-sm transition-shadow hover:shadow-md"
+                >
+                  <Image
+                    src={portadaDe(actividad)}
+                    alt={actividad.titulo}
+                    width={800}
+                    height={800}
+                    className="aspect-square w-full object-cover transition-transform group-hover:scale-105"
+                  />
+                  <div className="p-4">
+                    <p className="font-extrabold text-green-dark">{actividad.titulo}</p>
+                    <p className="mt-1 text-sm text-blue-mid group-hover:underline">
+                      Ver las {actividad.cantidadFotos} fotos →
+                    </p>
+                  </div>
+                </Link>
               ))}
             </div>
+
           </div>
         </section>
 

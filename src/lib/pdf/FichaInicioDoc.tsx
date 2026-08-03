@@ -7,7 +7,7 @@ import {
   estilos,
   type MetaImpresion,
 } from "@/lib/pdf/comunes";
-import { seccionesDe, tituloFicha, type DatosFicha } from "@/lib/ficha-fields";
+import { seccionesDe, tituloFicha, keyDeOpcion, type DatosFicha } from "@/lib/ficha-fields";
 
 export type PacienteFicha = {
   nombre: string;
@@ -103,6 +103,16 @@ export function FichaInicioDoc({
                   {item?.observacion && (
                     <Text style={estilos.observacion}>Obs.: {item.observacion}</Text>
                   )}
+                  {/* Ítems donde cada opción lleva su propia aclaración. */}
+                  {campo.observacionPorOpcion &&
+                    (campo.opciones ?? []).map((opcion) => {
+                      const obs = datos[keyDeOpcion(campo.key, opcion)]?.observacion;
+                      return obs ? (
+                        <Text key={opcion} style={estilos.observacion}>
+                          {opcion} — {obs}
+                        </Text>
+                      ) : null;
+                    })}
                 </View>
               );
             })}

@@ -1,27 +1,32 @@
 "use client";
 
-import { useState, FormEvent } from "react";
+import { useActionState } from "react";
+import { useFormStatus } from "react-dom";
 import { Button } from "./ui/Button";
+import { enviarConsulta, type EstadoConsulta } from "@/app/actions";
+
+function BotonEnviar() {
+  const { pending } = useFormStatus();
+  return (
+    <Button type="submit" variant="cta" className="justify-self-start" disabled={pending}>
+      {pending ? "Enviando..." : "Enviar consulta"}
+    </Button>
+  );
+}
 
 export function ContactForm() {
-  const [sent, setSent] = useState(false);
+  const [estado, accion] = useActionState<EstadoConsulta, FormData>(enviarConsulta, null);
 
-  function handleSubmit(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    // TODO: conectar con contacto_formulario (Supabase) cuando esté disponible el backend.
-    setSent(true);
-  }
-
-  if (sent) {
+  if (estado?.ok) {
     return (
       <p className="rounded-xl bg-green-light/40 p-6 text-center font-semibold text-green-dark">
-        ¡Gracias por escribirnos! Te vamos a responder a la brevedad.
+        {estado.mensaje}
       </p>
     );
   }
 
   return (
-    <form onSubmit={handleSubmit} className="grid gap-4">
+    <form action={accion} className="grid gap-4">
       <input
         required
         name="nombre"
@@ -54,9 +59,12 @@ export function ContactForm() {
         rows={4}
         className="rounded-xl border border-black/10 bg-white px-4 py-3 outline-blue-mid"
       />
-      <Button type="submit" variant="cta" className="justify-self-start">
-        Enviar consulta
-      </Button>
+
+      {estado && !estado.ok && (
+        <p className="text-sm font-semibold text-orange">{estado.mensaje}</p>
+      )}
+
+      <BotonEnviar />
     </form>
   );
 }

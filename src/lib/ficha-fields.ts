@@ -20,7 +20,20 @@ export type Campo = {
   // Si true, no mostrar campo de observación (para campos de texto/textarea).
   // Las observaciones solo van con selectores (opcion/multi).
   sinObservacion?: boolean;
+  // Si true, cada opción lleva su propio campo de observación al lado, en vez
+  // de una sola observación para todo el ítem. Se usa donde la planilla pide
+  // aclarar cada dificultad por separado (actividades de la vida diaria,
+  // dificultades actuales). Va junto con `sinObservacion: true`.
+  observacionPorOpcion?: boolean;
 };
+
+// Clave con la que se guarda la observación de una opción puntual dentro de
+// un campo con `observacionPorOpcion`. Queda como una entrada más de
+// `DatosFicha`, así no cambia la forma de lo ya guardado.
+export const SEPARADOR_OPCION = "::";
+export function keyDeOpcion(key: string, opcion: string) {
+  return `${key}${SEPARADOR_OPCION}${opcion}`;
+}
 
 export type Seccion = {
   titulo: string;
@@ -368,6 +381,10 @@ export const SECCIONES_ADULTOS: Seccion[] = [
         key: "actividades_vida_diaria",
         label: "Te cuesta",
         tipo: "multi",
+        // Cada actividad se aclara por separado: no sirve una sola
+        // observación para las nueve.
+        sinObservacion: true,
+        observacionPorOpcion: true,
         opciones: [
           "Organización del día",
           "Mantener rutinas",
@@ -390,6 +407,8 @@ export const SECCIONES_ADULTOS: Seccion[] = [
         key: "dificultades_actuales",
         label: "Hoy te cuesta",
         tipo: "multi",
+        sinObservacion: true,
+        observacionPorOpcion: true,
         opciones: [
           "Organizarme",
           "Sostener hábitos",
@@ -427,6 +446,8 @@ export const SECCIONES_ADULTOS: Seccion[] = [
         label: "¿Tenés dificultades?",
         tipo: "opcion",
         opciones: ["Sí", "No"],
+        // El detalle va en "¿Cuáles?", no en una observación aparte.
+        sinObservacion: true,
       },
       { key: "area_laboral", label: "¿Cuáles?", sinObservacion: true },
     ],
@@ -476,6 +497,8 @@ export const SECCIONES_ADULTOS: Seccion[] = [
         label: "¿Contás con apoyo de alguien?",
         tipo: "opcion",
         opciones: ["Sí", "No"],
+        // El detalle va en "¿Quiénes?".
+        sinObservacion: true,
       },
       { key: "red_apoyo", label: "¿Quiénes?", sinObservacion: true },
     ],
