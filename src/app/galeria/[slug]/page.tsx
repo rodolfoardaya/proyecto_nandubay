@@ -1,3 +1,8 @@
+// Se regenera cada 5 minutos: Hostinger conserva la caché de Next entre
+// despliegues, y sin esto la página seguía sirviéndose vieja después de
+// desplegar.
+export const revalidate = 300;
+
 import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";

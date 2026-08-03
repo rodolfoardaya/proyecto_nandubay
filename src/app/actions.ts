@@ -1,6 +1,10 @@
 "use server";
 
-import { createAdminClient } from "@/lib/supabase/admin";
+import { createClient } from "@/lib/supabase/server";
+
+// Tope de caracteres por campo. El formulario es público y anónimo: sin un
+// límite, cualquiera puede llenar la tabla con textos enormes.
+const TOPES = { nombre: 120, email: 160, telefono: 40, motivo: 200, mensaje: 4000 };
 
 // Consultas del formulario público del sitio.
 //
@@ -70,22 +74,26 @@ export async function enviarConsulta(
   _previo: EstadoConsulta,
   formData: FormData
 ): Promise<EstadoConsulta> {
+  const leer = (campo: keyof typeof TOPES) =>
+    String(formData.get(campo) || "").trim().slice(0, TOPES[campo]);
+
   const datos = {
-    nombre: String(formData.get("nombre") || "").trim(),
-    email: String(formData.get("email") || "").trim(),
-    telefono: String(formData.get("telefono") || "").trim(),
-    motivo: String(formData.get("motivo") || "").trim(),
-    mensaje: String(formData.get("mensaje") || "").trim(),
+    nombre: leer("nombre"),
+    email: leer("email"),
+    telefono: leer("telefono"),
+    motivo: leer("motivo"),
+    mensaje: leer("mensaje"),
   };
 
   if (!datos.nombre || !datos.email) {
     return { ok: false, mensaje: "Necesitamos al menos tu nombre y tu email." };
   }
 
-  // El formulario es público y quien lo completa no tiene sesión, así que la
-  // inserción va con el cliente de servicio.
-  const admin = createAdminClient();
-  const { error } = await admin.from("contacto_formulario").insert({
+  // Cliente anónimo, no el de servicio: la policy `contacto_insert_publico`
+  // ya habilita esta inserción, así que no hace falta saltear RLS en una
+  // ruta que puede disparar cualquiera desde internet.
+  const supabase = await createClient();
+  const { error } = await supabase.from("contacto_formulario").insert({
     nombre: datos.nombre,
     email: datos.email,
     telefono: datos.telefono || null,
