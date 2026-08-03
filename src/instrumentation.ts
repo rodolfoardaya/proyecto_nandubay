@@ -20,6 +20,15 @@ export async function register() {
 
   if (process.env.NODE_ENV !== "production") return;
 
-  const puerto = process.env.PORT || "3000";
-  process.env.__NEXT_PRIVATE_ORIGIN = `http://127.0.0.1:${puerto}`;
+  // Sólo se corrige cuando Next quedó con un origen inservible: 0.0.0.0 es una
+  // dirección para escuchar, no para conectarse. Con `next start` normal el
+  // origen es localhost y acá no se toca nada.
+  const origen = process.env.__NEXT_PRIVATE_ORIGIN ?? "";
+  if (!origen.includes("0.0.0.0")) return;
+
+  // El loopback tampoco sirve en este hosting: el proceso que atiende la
+  // request no comparte red con el que escucha en :3000 (ECONNREFUSED). El
+  // dominio público, en cambio, sí responde desde adentro.
+  const publico = process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/+$/, "");
+  if (publico) process.env.__NEXT_PRIVATE_ORIGIN = publico;
 }

@@ -78,7 +78,7 @@ export async function GET() {
 
   return NextResponse.json(
     {
-      version: "3-selffetch",
+      version: "4-origen-publico",
       nodo: process.version,
       instrumentation: {
         register_corrio: g.__nandubay_register_ok === true,
