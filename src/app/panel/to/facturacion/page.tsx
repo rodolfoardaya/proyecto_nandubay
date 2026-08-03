@@ -20,7 +20,11 @@ export default async function Facturacion() {
   await requireRole("to", "admin");
   const supabase = await createClient();
 
-  const { data: pacientes } = await supabase.from("pacientes").select("id, nombre").order("nombre");
+  const { data: pacientes } = await supabase
+    .from("pacientes")
+    .select("id, nombre")
+    .eq("activo", true)
+    .order("nombre");
 
   const { data: facturas } = await supabase
     .from("facturas")

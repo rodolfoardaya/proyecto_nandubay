@@ -18,6 +18,7 @@ const NAV: Record<string, { href: string; label: string }[]> = {
     { href: "/panel/admin/pacientes", label: "Pacientes" },
     { href: "/panel/admin/facturacion", label: "Facturación" },
     { href: "/panel/admin/backups", label: "Backups" },
+    { href: "/panel/admin/backup-disco", label: "Backup del sistema en disco" },
     { href: "/panel/admin/biblioteca", label: "Biblioteca" },
     { href: "/panel/admin/reportes", label: "Reportes" },
     { href: "/panel/admin/equipo", label: "Equipo TO" },

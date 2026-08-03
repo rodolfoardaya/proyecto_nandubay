@@ -35,7 +35,8 @@ export default async function PanelTo() {
   const { count: totalPacientes } = await supabase
     .from("pacientes")
     .select("id", { count: "exact", head: true })
-    .eq("to_asignada_id", to?.id);
+    .eq("to_asignada_id", to?.id)
+    .eq("activo", true);
 
   const turnosHoy = turnosSemana?.filter((t) => t.fecha === hoy) ?? [];
 

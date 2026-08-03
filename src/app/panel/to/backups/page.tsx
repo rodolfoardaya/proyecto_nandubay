@@ -9,6 +9,7 @@ export default async function Backups() {
   const { data: pacientes } = await supabase
     .from("pacientes")
     .select("id, nombre, numero_registro")
+    .eq("activo", true)
     .order("nombre");
 
   return (

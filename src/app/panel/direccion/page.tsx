@@ -23,7 +23,8 @@ export default async function PanelDireccion() {
 
   const { count: totalPacientes } = await supabase
     .from("pacientes")
-    .select("id", { count: "exact", head: true });
+    .select("id", { count: "exact", head: true })
+    .eq("activo", true);
 
   const { count: totalTos } = await supabase
     .from("tos")

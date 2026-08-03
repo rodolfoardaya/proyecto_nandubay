@@ -24,6 +24,7 @@ export default async function ListaPacientes({
   let query = supabase
     .from("pacientes")
     .select("id, numero_registro, nombre, dni, tipo")
+    .eq("activo", true)
     .order("numero_registro");
 
   if (usuario.rol === "to") {

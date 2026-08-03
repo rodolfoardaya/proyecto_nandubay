@@ -5,6 +5,15 @@ import { Button } from "@/components/ui/Button";
 import { ResetearClaveButton } from "@/components/ResetearClaveButton";
 import { crearTo, actualizarTo, cambiarEstadoTo, subirFotoTo } from "./actions";
 
+function iniciales(nombre: string) {
+  return nombre
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((p) => p[0]?.toUpperCase() ?? "")
+    .join("");
+}
+
 async function archivoUrl(
   supabase: Awaited<ReturnType<typeof createClient>>,
   path: string | null
@@ -37,21 +46,40 @@ export default async function EquipoTo() {
       <div className="mt-6 grid gap-4 sm:grid-cols-2">
         {tosConFoto?.map((t) => (
           <Card key={t.id}>
-            {t.fotoSignedUrl && (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={t.fotoSignedUrl}
-                alt={t.nombre}
-                className="mb-3 h-32 w-full rounded-lg object-cover"
-              />
-            )}
-            <div className="flex items-center gap-2">
-              <p className="font-bold text-green-dark">{t.nombre}</p>
-              {!t.activo && (
-                <span className="rounded-full bg-orange/15 px-2 py-0.5 text-xs font-bold text-orange">
-                  Dada de baja
-                </span>
+            {/* La foto va como retrato circular al lado del nombre: un recorte
+                apaisado de ancho completo cortaba las caras. Las TO sin foto
+                muestran sus iniciales para que las fichas no queden desparejas. */}
+            <div className="flex items-center gap-3">
+              {t.fotoSignedUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={t.fotoSignedUrl}
+                  alt={`Foto de ${t.nombre}`}
+                  className={`h-16 w-16 shrink-0 rounded-full object-cover ring-2 ring-green-light ${
+                    t.activo ? "" : "grayscale"
+                  }`}
+                />
+              ) : (
+                <div
+                  aria-hidden
+                  className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-green-light/40 text-lg font-extrabold text-green-dark"
+                >
+                  {iniciales(t.nombre)}
+                </div>
               )}
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="font-bold text-green-dark">{t.nombre}</p>
+                  {!t.activo && (
+                    <span className="rounded-full bg-orange/15 px-2 py-0.5 text-xs font-bold text-orange">
+                      Dada de baja
+                    </span>
+                  )}
+                </div>
+                {!t.fotoSignedUrl && (
+                  <p className="text-xs text-foreground/50">Sin foto cargada</p>
+                )}
+              </div>
             </div>
             <p className="text-sm text-foreground/60">
               Usuario:{" "}
@@ -122,7 +150,7 @@ export default async function EquipoTo() {
 
             <details className="mt-2">
               <summary className="cursor-pointer text-xs font-semibold text-blue-mid">
-                Subir foto
+                {t.fotoSignedUrl ? "Cambiar foto" : "Subir foto"}
               </summary>
               <form action={subirFotoTo} className="mt-2 grid gap-2">
                 <input type="hidden" name="to_id" value={t.id} />
