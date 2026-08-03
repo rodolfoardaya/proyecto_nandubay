@@ -38,12 +38,31 @@ export async function GET() {
   const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   const service = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
+  // Un solo carácter no-ASCII en una clave rompe el header HTTP antes de
+  // salir a la red. Se reporta dónde está sin revelar el valor.
+  function forma(v: string | undefined) {
+    if (!v) return "FALTA";
+    const sucios = [...v]
+      .map((c, i) => ({ i, cp: c.codePointAt(0)! }))
+      .filter(({ cp }) => cp > 126 || cp < 32)
+      .slice(0, 10);
+    return {
+      largo: v.length,
+      empieza: v.slice(0, 6),
+      termina: v.slice(-4),
+      limpia: sucios.length === 0,
+      caracteres_invalidos: sucios.length
+        ? sucios.map(({ i, cp }) => `indice ${i}: codigo ${cp}`)
+        : null,
+    };
+  }
+
   const variables = {
     NEXT_PUBLIC_SUPABASE_URL: url ?? null,
-    NEXT_PUBLIC_SUPABASE_ANON_KEY: anon ? `presente (${anon.length} caracteres)` : "FALTA",
-    SUPABASE_SERVICE_ROLE_KEY: service ? `presente (${service.length} caracteres)` : "FALTA",
     NEXT_PUBLIC_SITE_URL: process.env.NEXT_PUBLIC_SITE_URL ?? null,
-    ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY ? "presente" : "FALTA",
+    NEXT_PUBLIC_SUPABASE_ANON_KEY: forma(anon),
+    SUPABASE_SERVICE_ROLE_KEY: forma(service),
+    ANTHROPIC_API_KEY: forma(process.env.ANTHROPIC_API_KEY),
   };
 
   const pruebas: Record<string, Detalle | string | Record<string, unknown>> = {};
@@ -119,7 +138,7 @@ export async function GET() {
 
   return NextResponse.json(
     {
-      version: "5-service-role",
+      version: "6-forma-claves",
       nodo: process.version,
       instrumentation: {
         register_corrio: g.__nandubay_register_ok === true,
