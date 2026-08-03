@@ -29,8 +29,15 @@ async function avisarPorMail(datos: {
 }) {
   const apiKey = process.env.RESEND_API_KEY;
   // Sin API key configurada no se manda nada: la consulta igual quedó
-  // guardada, y el aviso empieza a salir apenas se cargue la variable.
-  if (!apiKey) return;
+  // guardada, y el aviso empieza a salir apenas se cargue la variable. Se
+  // deja constancia en el log porque, en silencio, era imposible distinguir
+  // "falta la variable" de "el mail falló".
+  if (!apiKey) {
+    console.warn(
+      "[contacto] consulta guardada pero NO se envió aviso: falta la variable RESEND_API_KEY en este servidor."
+    );
+    return;
+  }
 
   const remitente = process.env.MAIL_REMITENTE || "Ñandubay <onboarding@resend.dev>";
 
