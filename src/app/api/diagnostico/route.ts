@@ -62,9 +62,31 @@ export async function GET() {
     pruebas.supabase_raiz = "no se puede probar: falta NEXT_PUBLIC_SUPABASE_URL";
   }
 
+  // Lo que rompe el login: el self-fetch que hace Next para resolver el
+  // redirect() de una Server Action. Se prueban los dos orígenes posibles.
+  const g = globalThis as Record<string, unknown>;
+  const puerto = process.env.PORT || "3000";
+  const origenActual = process.env.__NEXT_PRIVATE_ORIGIN ?? "(sin definir)";
+
+  const selfFetch: Record<string, Detalle> = {
+    loopback: await probar(`http://127.0.0.1:${puerto}/login`),
+  };
+  if (origenActual.startsWith("http")) {
+    selfFetch.origen_actual = await probar(`${origenActual}/login`);
+  }
+  selfFetch.dominio_publico = await probar("https://espacionandubay.com/login");
+
   return NextResponse.json(
     {
+      version: "3-selffetch",
       nodo: process.version,
+      instrumentation: {
+        register_corrio: g.__nandubay_register_ok === true,
+        origen_antes: g.__nandubay_origen_previo ?? "(register no corrió)",
+        origen_ahora: origenActual,
+        PORT: process.env.PORT ?? "(sin definir)",
+      },
+      self_fetch: selfFetch,
       variables,
       pruebas,
     },

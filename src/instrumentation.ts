@@ -11,6 +11,13 @@
 // así que es el único lugar donde se la puede apuntar al loopback.
 export async function register() {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
+
+  // Deja constancia de que corrió y de qué origen encontró, para poder
+  // verificarlo desde /api/diagnostico en el server ya desplegado.
+  const g = globalThis as Record<string, unknown>;
+  g.__nandubay_origen_previo = process.env.__NEXT_PRIVATE_ORIGIN ?? "(sin definir)";
+  g.__nandubay_register_ok = true;
+
   if (process.env.NODE_ENV !== "production") return;
 
   const puerto = process.env.PORT || "3000";
