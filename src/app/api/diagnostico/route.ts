@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 // Diagnóstico de conectividad para el servidor donde está desplegada la app.
 // No devuelve ninguna clave: sólo si están presentes y qué pasa al intentar
@@ -45,7 +46,7 @@ export async function GET() {
     ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY ? "presente" : "FALTA",
   };
 
-  const pruebas: Record<string, Detalle | string> = {};
+  const pruebas: Record<string, Detalle | string | Record<string, unknown>> = {};
 
   // 1. ¿Sale a internet en general?
   pruebas.internet = await probar("https://api.github.com/zen");
@@ -61,6 +62,46 @@ export async function GET() {
   } else {
     pruebas.supabase_raiz = "no se puede probar: falta NEXT_PUBLIC_SUPABASE_URL";
   }
+
+  // 3. El camino que usa el login: service role key. Hasta ahora sólo se había
+  // probado la anon key, que es otra credencial y otro cliente.
+  if (url) {
+    pruebas.service_role_fetch = await probar(
+      `${url}/rest/v1/usuarios?select=usuario&limit=1`,
+      { apikey: service ?? "", Authorization: `Bearer ${service ?? ""}` }
+    );
+  }
+
+  // 4. Exactamente lo que hace resolverEmail(): mismo cliente, misma consulta.
+  const inicioAdmin = Date.now();
+  let loginQuery: Record<string, unknown>;
+  try {
+    const admin = createAdminClient();
+    const { data, error } = await admin
+      .from("usuarios")
+      .select("usuario")
+      .eq("usuario", "RARDAYA")
+      .maybeSingle();
+    loginQuery = {
+      ok: !error,
+      encontro_usuario: !!data,
+      error: error?.message ?? null,
+      detalle: error?.details ?? null,
+      hint: error?.hint ?? null,
+      codigo: error?.code ?? null,
+      ms: Date.now() - inicioAdmin,
+    };
+  } catch (e) {
+    const err = e as Error & { cause?: { message?: string; code?: string } };
+    loginQuery = {
+      ok: false,
+      excepcion: err.message,
+      causa: err.cause?.message ?? null,
+      codigo: err.cause?.code ?? null,
+      ms: Date.now() - inicioAdmin,
+    };
+  }
+  pruebas.como_lo_hace_el_login = loginQuery;
 
   // Lo que rompe el login: el self-fetch que hace Next para resolver el
   // redirect() de una Server Action. Se prueban los dos orígenes posibles.
@@ -78,7 +119,7 @@ export async function GET() {
 
   return NextResponse.json(
     {
-      version: "4-origen-publico",
+      version: "5-service-role",
       nodo: process.version,
       instrumentation: {
         register_corrio: g.__nandubay_register_ok === true,
