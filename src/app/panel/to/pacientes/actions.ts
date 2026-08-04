@@ -8,6 +8,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { SECCIONES_NINOS, SECCIONES_ADULTOS, CAMPOS_ACUERDO } from "@/lib/ficha-fields";
 import { parseDatosFicha, parseObservaciones } from "@/lib/observaciones";
+import { registrarAuditoria } from "@/lib/auditoria";
 
 // Sube una firma manuscrita (dataURL PNG del FirmaPad) al bucket privado
 // "documentos" y devuelve la ruta guardada, o null si no se firmó nada.
@@ -284,5 +285,65 @@ export async function invitarFamiliar(formData: FormData) {
 
   await admin.from("pacientes").update({ familiar_id: invitado.user.id }).eq("id", paciente_id);
 
+  revalidatePath(`/panel/${usuario.rol}/pacientes/${paciente_id}`);
+}
+
+// Documentos sueltos del paciente: estudios, informes de otros profesionales,
+// certificados. La ficha y el acuerdo guardan su escaneo aparte; esto es para
+// todo lo demás, que antes no tenía dónde ir.
+export async function subirDocumentoPaciente(formData: FormData) {
+  const usuario = await requireRole("to", "admin");
+  const supabase = await createClient();
+
+  const paciente_id = String(formData.get("paciente_id"));
+  const titulo = String(formData.get("titulo") || "").trim();
+  const tipo = String(formData.get("tipo") || "estudio");
+  const descripcion = String(formData.get("descripcion") || "").trim();
+  const archivo = formData.get("archivo") as File | null;
+
+  if (!archivo || archivo.size === 0) {
+    throw new Error("No se seleccionó ningún archivo");
+  }
+  if (!titulo) {
+    throw new Error("Falta el título del documento");
+  }
+
+  const ruta = await subirArchivo(supabase, archivo, `documentos/${paciente_id}`);
+  if (!ruta) throw new Error("No se pudo subir el archivo");
+
+  const { error } = await supabase.from("documentos_paciente").insert({
+    paciente_id,
+    tipo,
+    titulo,
+    descripcion: descripcion || null,
+    archivo_url: ruta,
+    nombre_original: archivo.name,
+    tamano_bytes: archivo.size,
+    subido_por: usuario.id,
+  });
+
+  if (error) throw new Error(error.message);
+
+  await registrarAuditoria("carga_documento", `${titulo} — paciente ${paciente_id}`);
+  revalidatePath(`/panel/${usuario.rol}/pacientes/${paciente_id}`);
+}
+
+// No se borra la fila: forma parte de la historia clínica. Se marca como no
+// vigente y deja de listarse.
+export async function archivarDocumentoPaciente(formData: FormData) {
+  const usuario = await requireRole("to", "admin");
+  const supabase = await createClient();
+
+  const documento_id = String(formData.get("documento_id"));
+  const paciente_id = String(formData.get("paciente_id"));
+
+  const { error } = await supabase
+    .from("documentos_paciente")
+    .update({ vigente: false })
+    .eq("id", documento_id);
+
+  if (error) throw new Error(error.message);
+
+  await registrarAuditoria("archivado_documento", `documento ${documento_id}`);
   revalidatePath(`/panel/${usuario.rol}/pacientes/${paciente_id}`);
 }

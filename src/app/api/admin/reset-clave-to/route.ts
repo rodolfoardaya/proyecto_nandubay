@@ -26,7 +26,14 @@ export async function POST(request: NextRequest) {
 
   const clave = generarClave();
   const admin = createAdminClient();
-  const { error } = await admin.auth.admin.updateUserById(usuario_id, { password: clave });
+  // Se confirma el email junto con el reseteo: si la invitación original
+  // nunca se aceptó, la cuenta queda con el email sin confirmar y la clave
+  // nueva no sirve para entrar ("Email not confirmed"), sin ninguna pista de
+  // por qué.
+  const { error } = await admin.auth.admin.updateUserById(usuario_id, {
+    password: clave,
+    email_confirm: true,
+  });
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });

@@ -18,6 +18,7 @@ export function NuevoPacienteForm({ tipo, secciones }: Props) {
   const [leyendo, setLeyendo] = useState(false);
   const [ocrError, setOcrError] = useState<string | null>(null);
   const [leido, setLeido] = useState(false);
+  const [resumen, setResumen] = useState("");
 
   // El apellido y el nombre se cargan por separado, como en la planilla en
   // papel, pero se guardan juntos en `pacientes.nombre` (que es lo que ven
@@ -61,41 +62,41 @@ export function NuevoPacienteForm({ tipo, secciones }: Props) {
       const fd = new FormData();
       fd.append("archivo", archivo);
       fd.append("tipo", tipo);
-      const res = await fetch("/api/ocr-ficha", { method: "POST", body: fd });
+      const res = await fetch("/api/planilla", { method: "POST", body: fd });
       const data = await res.json();
 
       if (!res.ok) {
-        setOcrError(
-          res.status === 501
-            ? "Lectura automática no configurada — completá los datos a mano."
-            : "No se pudo leer el archivo — completá o corregí los datos a mano."
-        );
+        setOcrError(data?.error ?? "No se pudo leer la planilla.");
         return;
       }
 
-      // La lectura automática devuelve el nombre completo en una sola línea:
-      // se deja entero en Apellido para que la TO lo separe al revisar.
       setPaciente({
-        apellido: (data.nombre || "").toUpperCase(),
-        nombre: "",
-        dni: data.dni || "",
-        fecha_nacimiento: data.fecha_nacimiento || "",
+        apellido: data.paciente?.apellido || "",
+        nombre: data.paciente?.nombre || "",
+        dni: data.paciente?.dni || "",
+        fecha_nacimiento: data.paciente?.fecha_nacimiento || "",
       });
-      const nuevosDatos: DatosFicha = {};
-      for (const s of secciones) {
-        for (const c of s.campos) nuevosDatos[c.key] = { valor: data[c.key] || "", observacion: "" };
-      }
-      setDatos(nuevosDatos);
+      setDatos(data.datos ?? {});
+
+      const ac = data.acuerdo ?? {};
+      const si = (v: string) => /^(si|sí|true|1|x)$/i.test((v ?? "").trim());
       setAcuerdoValores({
-        valor_sesion: data.valor_sesion ? String(data.valor_sesion) : "",
-        forma_pago: data.forma_pago || "",
-        duracion_sesion_minutos: data.duracion_sesion_minutos ? String(data.duracion_sesion_minutos) : "45",
-        modalidad: data.modalidad === "online" ? "online" : "presencial",
-        autoriza_imagenes: !!data.autoriza_imagenes,
+        valor_sesion: ac.valor_sesion ?? "",
+        forma_pago: ac.forma_pago ?? "",
+        duracion_sesion_minutos: ac.duracion_sesion_minutos || "45",
+        modalidad: /online/i.test(ac.modalidad ?? "") ? "online" : "presencial",
+        autoriza_imagenes: si(ac.autoriza_imagenes),
       });
+
+      setResumen(
+        `Se cargaron ${data.camposLeidos} datos de la planilla.` +
+          (data.clavesDesconocidas?.length
+            ? ` ${data.clavesDesconocidas.length} renglón(es) no se reconocieron y se ignoraron.`
+            : "")
+      );
       setLeido(true);
     } catch {
-      setOcrError("No se pudo leer el archivo — completá o corregí los datos a mano.");
+      setOcrError("No se pudo leer el archivo.");
     } finally {
       setLeyendo(false);
     }
@@ -121,30 +122,55 @@ export function NuevoPacienteForm({ tipo, secciones }: Props) {
             onClick={() => setMetodo("pdf")}
             className={`rounded-full px-4 py-2 ${metodo === "pdf" ? "bg-green-mid text-white" : "border border-black/10"}`}
           >
-            Subir PDF o foto manuscrita
+            Cargar desde planilla
           </button>
         </div>
 
         {metodo === "pdf" && (
-          <div className="mt-2 grid gap-2">
-            <input
-              type="file"
-              name="archivo_ficha"
-              accept="application/pdf,image/jpeg,image/png,image/webp"
-              capture="environment"
-              onChange={handleArchivo}
-              className="rounded-xl border border-black/10 px-4 py-3"
-            />
-            <p className="text-xs text-foreground/50">
-              PDF o foto (JPG/PNG/WEBP) de la planilla completada a mano.
-            </p>
-            {leyendo && <p className="text-sm text-blue-mid">Leyendo con IA...</p>}
+          <div className="mt-2 grid gap-3">
+            <div className="rounded-xl bg-yellow-soft/30 p-4 text-sm">
+              <p className="font-bold text-green-dark">1. Descargá la planilla</p>
+              <p className="mt-1 text-foreground/70">
+                Trae un renglón por dato, con las opciones válidas de cada uno.
+                La completa una persona en Excel o un asistente que lea la ficha
+                en papel. Solo hay que llenar las columnas{" "}
+                <b>VALOR</b> y <b>OBSERVACION</b>, sin tocar las demás.
+              </p>
+              <a
+                href={`/api/planilla?tipo=${tipo}`}
+                className="mt-2 inline-block font-bold text-blue-mid hover:underline"
+              >
+                Descargar planilla de {tipo === "adulto" ? "adultos" : "niños"} (CSV) ↓
+              </a>
+            </div>
+
+            <div>
+              <p className="text-sm font-bold text-green-dark">
+                2. Subí la planilla completada
+              </p>
+              <input
+                type="file"
+                accept=".csv,text/csv,text/plain"
+                onChange={handleArchivo}
+                className="mt-2 w-full rounded-xl border border-black/10 px-4 py-3"
+              />
+              <p className="mt-1 text-xs text-foreground/50">
+                Si la completaste en Excel, guardala como <b>CSV UTF-8</b>.
+              </p>
+            </div>
+
+            {leyendo && <p className="text-sm text-blue-mid">Leyendo la planilla...</p>}
             {ocrError && <p className="text-sm text-orange">{ocrError}</p>}
             {leido && !leyendo && (
               <p className="text-sm font-semibold text-green-dark">
-                Datos leídos — revisalos abajo y corregí lo que haga falta antes de aceptar.
+                {resumen} Revisá todo abajo y corregí lo que haga falta antes de guardar.
               </p>
             )}
+
+            <p className="text-xs text-foreground/60">
+              3. El escaneo del acuerdo firmado en papel se adjunta más abajo,
+              en la sección <b>Acuerdo terapéutico</b>.
+            </p>
           </div>
         )}
       </section>

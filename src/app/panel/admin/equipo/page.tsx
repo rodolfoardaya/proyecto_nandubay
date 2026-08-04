@@ -23,9 +23,14 @@ async function archivoUrl(
   return data?.signedUrl ?? null;
 }
 
-export default async function EquipoTo() {
+export default async function EquipoTo({
+  searchParams,
+}: {
+  searchParams: Promise<{ nueva_to?: string; clave?: string }>;
+}) {
   await requireRole("admin");
   const supabase = await createClient();
+  const { nueva_to, clave } = await searchParams;
 
   const { data: tos } = await supabase
     .from("tos")
@@ -42,6 +47,25 @@ export default async function EquipoTo() {
   return (
     <div>
       <h1 className="text-2xl font-extrabold text-green-dark">Equipo TO</h1>
+
+      {nueva_to && clave && (
+        <div className="mt-4 rounded-2xl border-2 border-green-mid bg-green-light/20 p-5">
+          <p className="font-bold text-green-dark">
+            Cuenta creada para {nueva_to}
+          </p>
+          <p className="mt-1 text-sm text-foreground/70">
+            Anotá esta clave y entregásela en mano. <b>No se puede volver a
+            ver</b>: el sistema guarda solo una versión cifrada.
+          </p>
+          <p className="mt-3 rounded-xl bg-white px-4 py-3 font-mono text-lg font-bold tracking-widest text-green-dark">
+            {clave}
+          </p>
+          <p className="mt-2 text-xs text-foreground/60">
+            Ya puede entrar con el usuario <b>{nueva_to}</b> y esta clave. Pedile
+            que la cambie desde <b>Mi cuenta</b> la primera vez que ingrese.
+          </p>
+        </div>
+      )}
 
       <div className="mt-6 grid gap-4 sm:grid-cols-2">
         {tosConFoto?.map((t) => (

@@ -1,9 +1,18 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { requireRole } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+
+// Sin caracteres que se confundan al dictarla o anotarla (O/0, I/1, l).
+function generarClaveProvisoria(): string {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let out = "";
+  for (let i = 0; i < 10; i++) out += chars[Math.floor(Math.random() * chars.length)];
+  return out;
+}
 
 export async function crearTo(formData: FormData) {
   await requireRole("admin");
@@ -17,21 +26,29 @@ export async function crearTo(formData: FormData) {
 
   const admin = createAdminClient();
 
-  // Crea la cuenta de auth con contraseña temporal e invita por email para
-  // que la profesional defina su propia contraseña.
-  const { data: invitado, error: errorInvite } =
-    await admin.auth.admin.inviteUserByEmail(email, {
-      redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL}/login`,
-    });
+  // La cuenta se crea con una clave provisoria y el email ya confirmado, y
+  // esa clave se le entrega en mano a la profesional.
+  //
+  // Antes esto mandaba una invitación por email de Supabase. En el plan
+  // gratuito esos mails no llegan, así que la cuenta quedaba creada pero
+  // imposible de usar: la TO no podía entrar y no había forma de saber por
+  // qué (el login sólo decía "Email not confirmed").
+  const clave = generarClaveProvisoria();
 
-  if (errorInvite || !invitado.user) {
-    throw new Error(errorInvite?.message ?? "No se pudo invitar a la TO");
+  const { data: creado, error: errorCrear } = await admin.auth.admin.createUser({
+    email,
+    password: clave,
+    email_confirm: true,
+  });
+
+  if (errorCrear || !creado.user) {
+    throw new Error(errorCrear?.message ?? "No se pudo crear la cuenta de la TO");
   }
 
   const supabase = await createClient();
 
   await admin.from("usuarios").insert({
-    id: invitado.user.id,
+    id: creado.user.id,
     email,
     usuario,
     nombre,
@@ -39,7 +56,7 @@ export async function crearTo(formData: FormData) {
   });
 
   await supabase.from("tos").insert({
-    usuario_id: invitado.user.id,
+    usuario_id: creado.user.id,
     nombre,
     dni,
     matricula,
@@ -47,6 +64,10 @@ export async function crearTo(formData: FormData) {
   });
 
   revalidatePath("/panel/admin/equipo");
+
+  // La clave viaja en la URL una sola vez para poder mostrarla; Supabase
+  // guarda sólo el hash, así que después ya no hay forma de recuperarla.
+  redirect(`/panel/admin/equipo?nueva_to=${encodeURIComponent(usuario)}&clave=${encodeURIComponent(clave)}`);
 }
 
 export async function actualizarTo(formData: FormData) {

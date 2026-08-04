@@ -7,6 +7,7 @@ import { FirmaPad } from "@/components/FirmaPad";
 import { FichaCamposEditables } from "@/components/FichaCamposEditables";
 import { AcuerdoTerapeuticoForm } from "@/components/AcuerdoTerapeuticoForm";
 import { calcularDatosFaltantes } from "@/lib/datos-faltantes";
+import { DocumentosPaciente } from "@/components/DocumentosPaciente";
 import {
   actualizarFichaInicio,
   actualizarAcuerdo,
@@ -66,6 +67,20 @@ export default async function PerfilPaciente({
     .select("id, fecha, nota, objetivos_trabajados, firma_url")
     .eq("paciente_id", id)
     .order("fecha", { ascending: false });
+
+  const { data: documentos } = await supabase
+    .from("documentos_paciente")
+    .select("id, tipo, titulo, descripcion, nombre_original, tamano_bytes, archivo_url, created_at")
+    .eq("paciente_id", id)
+    .eq("vigente", true)
+    .order("created_at", { ascending: false });
+
+  const documentosConUrl = await Promise.all(
+    (documentos ?? []).map(async (d) => ({
+      ...d,
+      url: await archivoUrl(supabase, d.archivo_url),
+    }))
+  );
 
   const acuerdoFirmaUrl = await archivoUrl(supabase, acuerdo?.firma_url ?? null);
   const acuerdoArchivoUrl = await archivoUrl(supabase, acuerdo?.archivo_adjunto_url ?? null);
@@ -318,6 +333,8 @@ export default async function PerfilPaciente({
           <p className="text-sm text-foreground/60">Sin turnos cargados todavía.</p>
         )}
       </div>
+
+      <DocumentosPaciente pacienteId={id} documentos={documentosConUrl} />
     </div>
   );
 }

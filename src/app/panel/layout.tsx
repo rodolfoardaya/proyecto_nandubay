@@ -74,6 +74,9 @@ export default async function PanelLayout({
         <div className="border-t border-white/10 px-5 py-3 text-sm md:py-4">
           <p className="font-semibold">{usuario.nombre}</p>
           <p className="text-white/60 capitalize">{usuario.rol}</p>
+          <Link href="/panel/cuenta" className="mt-2 block text-xs underline text-white/70">
+            Mi cuenta y clave
+          </Link>
           <Link href="/" className="mt-2 block text-xs underline text-white/70">
             ← Volver al sitio
           </Link>
