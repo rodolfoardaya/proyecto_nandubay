@@ -48,6 +48,8 @@ export const estilos = StyleSheet.create({
   cabeceraLogo: { width: 26, height: 26 },
   cabeceraNombre: { fontSize: 9, fontFamily: "Helvetica-Bold", color: "#1F6F4A" },
   cabeceraMeta: { fontSize: 7.5, color: "#666", textAlign: "right" },
+  cabeceraPaciente: { fontSize: 8.5, fontFamily: "Helvetica-Bold", color: "#333" },
+  cabeceraPacienteDatos: { fontSize: 7.5, color: "#666" },
 
   membreteLogo: { width: 92, height: 92, alignSelf: "center", marginBottom: 6 },
   membreteCentrado: { textAlign: "center", fontSize: 10 },
@@ -77,26 +79,55 @@ export const estilos = StyleSheet.create({
   firmaValor: { flex: 1, borderBottom: "1 solid #333", paddingBottom: 1 },
   firmaImagen: { height: 34, width: 110 },
 
-  pie: {
+  pieBloque: {
     position: "absolute",
     bottom: 20,
     left: 46,
     right: 46,
-    fontSize: 7.5,
-    color: "#888",
-    textAlign: "center",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
   },
+  pie: { fontSize: 7.5, color: "#888" },
+  pieNumero: { fontSize: 7.5, color: "#666", fontFamily: "Helvetica-Bold" },
 });
 
 // Cabecera fija que se repite en todas las páginas: logo del consultorio,
 // fecha de impresión y usuario que imprime.
-export function CabeceraImpresion({ meta }: { meta: MetaImpresion }) {
+// Identificación del paciente, para que cada hoja suelta se pueda atribuir
+// sin ambigüedad a su historia clínica.
+export type PacienteCabecera = {
+  nombre: string;
+  numero_registro: string;
+  dni?: string | null;
+  fecha_nacimiento?: string | null;
+};
+
+export function CabeceraImpresion({
+  meta,
+  paciente,
+}: {
+  meta: MetaImpresion;
+  paciente?: PacienteCabecera;
+}) {
   const img = logo();
   return (
     <View style={estilos.cabecera} fixed>
       <View style={estilos.cabeceraMarca}>
         {img && <Image style={estilos.cabeceraLogo} src={{ data: img, format: "jpg" }} />}
-        <Text style={estilos.cabeceraNombre}>Espacio Ñandubay</Text>
+        <View>
+          <Text style={estilos.cabeceraNombre}>Espacio Ñandubay</Text>
+          {paciente && (
+            <>
+              <Text style={estilos.cabeceraPaciente}>{paciente.nombre}</Text>
+              <Text style={estilos.cabeceraPacienteDatos}>
+                Nº {paciente.numero_registro}
+                {paciente.dni ? ` · DNI ${paciente.dni}` : ""}
+                {paciente.fecha_nacimiento ? ` · Nace ${paciente.fecha_nacimiento}` : ""}
+              </Text>
+            </>
+          )}
+        </View>
       </View>
       <Text style={estilos.cabeceraMeta}>
         Impreso el {meta.fecha}
@@ -125,11 +156,19 @@ export function Membrete({ titulo }: { titulo: string }) {
   );
 }
 
+// El número de hoja va en todas: una historia clínica impresa que se
+// desordena o a la que le falta una hoja tiene que poder detectarse.
 export function PieConfidencial() {
   return (
-    <Text style={estilos.pie} fixed>
-      Documento clínico confidencial — Ley 26.529 y Ley 25.326. Uso exclusivo profesional.
-    </Text>
+    <View style={estilos.pieBloque} fixed>
+      <Text style={estilos.pie}>
+        Documento clínico confidencial — Ley 26.529 y Ley 25.326. Uso exclusivo profesional.
+      </Text>
+      <Text
+        style={estilos.pieNumero}
+        render={({ pageNumber, totalPages }) => `${pageNumber}/${totalPages}`}
+      />
+    </View>
   );
 }
 

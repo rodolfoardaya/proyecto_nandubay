@@ -416,7 +416,14 @@ export function AcuerdoDoc({
   return (
     <Document title={`Acuerdo terapéutico — ${paciente.nombre}`}>
       <Page size="A4" style={estilos.page}>
-        <CabeceraImpresion meta={meta} />
+        <CabeceraImpresion
+          meta={meta}
+          paciente={{
+            nombre: paciente.nombre,
+            numero_registro: paciente.numero_registro,
+            dni: paciente.dni,
+          }}
+        />
         <PieConfidencial />
 
         <Membrete titulo={titulo} />

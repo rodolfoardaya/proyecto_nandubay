@@ -1,4 +1,5 @@
 "use client";
+import { BotonEnvio } from "@/components/ui/BotonEnvio";
 
 import { useState } from "react";
 import { Button } from "@/components/ui/Button";
@@ -237,9 +238,9 @@ export function NuevoPacienteForm({ tipo, secciones }: Props) {
         <FirmaPad name="firma" />
       </section>
 
-      <Button type="submit" variant="primary" className="justify-self-start">
+      <BotonEnvio enCurso="Dando de alta..." className="justify-self-start">
         {metodo === "pdf" ? "Aceptar datos y dar de alta" : "Guardar paciente"}
-      </Button>
+      </BotonEnvio>
     </form>
   );
 }

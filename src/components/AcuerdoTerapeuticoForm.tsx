@@ -1,4 +1,5 @@
 "use client";
+import { BotonEnvio } from "@/components/ui/BotonEnvio";
 
 import { useState } from "react";
 import { Button } from "@/components/ui/Button";
@@ -42,9 +43,9 @@ export function AcuerdoTerapeuticoForm({
         archivoAdjuntoUrl={archivoAdjuntoUrl}
       />
       <FirmaPad name="firma" firmaActualUrl={firmaActualUrl} />
-      <Button type="submit" variant="primary" className="justify-self-start">
+      <BotonEnvio enCurso="Guardando acuerdo..." className="justify-self-start">
         {etiquetaSubmit}
-      </Button>
+      </BotonEnvio>
     </form>
   );
 }

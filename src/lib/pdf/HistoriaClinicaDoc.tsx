@@ -34,7 +34,7 @@ function PacienteSection({ p }: { p: PacienteBackup }) {
   const datos = p.ficha?.datos ?? {};
 
   return (
-    <View break>
+    <View>
       <Text style={estilos.membreteNombre}>{p.nombre}</Text>
       <Text style={{ ...estilos.membreteCentrado, marginBottom: 6 }}>
         Nº {p.numero_registro} · {p.tipo}
@@ -128,20 +128,34 @@ export function HistoriaClinicaDoc({
 }) {
   return (
     <Document title="Historias clínicas — Espacio Ñandubay">
-      <Page size="A4" style={estilos.page}>
-        <CabeceraImpresion meta={meta} />
-        <PieConfidencial />
+      {/* Cada paciente en su propia hoja: así el encabezado fijo puede llevar
+          sus datos, y una hoja suelta nunca queda sin identificar. */}
+      {pacientes.length > 1 && (
+        <Page size="A4" style={estilos.page}>
+          <CabeceraImpresion meta={meta} />
+          <PieConfidencial />
+          <Membrete titulo="HISTORIAS CLÍNICAS" />
+          <Text style={{ textAlign: "center", marginBottom: 4 }}>
+            {pacientes.length} pacientes · Emitido por {meta.usuario} el {meta.fecha}
+          </Text>
+        </Page>
+      )}
 
-        <Membrete titulo="HISTORIAS CLÍNICAS" />
-        <Text style={{ textAlign: "center", marginBottom: 4 }}>
-          {pacientes.length} paciente{pacientes.length === 1 ? "" : "s"} · Emitido por {meta.usuario}{" "}
-          el {meta.fecha}
-        </Text>
-
-        {pacientes.map((p) => (
-          <PacienteSection key={p.numero_registro} p={p} />
-        ))}
-      </Page>
+      {pacientes.map((p) => (
+        <Page key={p.numero_registro} size="A4" style={estilos.page}>
+          <CabeceraImpresion
+            meta={meta}
+            paciente={{
+              nombre: p.nombre,
+              numero_registro: p.numero_registro,
+              dni: p.dni,
+              fecha_nacimiento: p.fecha_nacimiento,
+            }}
+          />
+          <PieConfidencial />
+          <PacienteSection p={p} />
+        </Page>
+      ))}
     </Document>
   );
 }

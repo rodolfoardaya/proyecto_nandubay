@@ -1,4 +1,5 @@
 import { Button } from "@/components/ui/Button";
+import { BotonEnvio } from "@/components/ui/BotonEnvio";
 import {
   subirDocumentoPaciente,
   archivarDocumentoPaciente,
@@ -132,9 +133,9 @@ export function DocumentosPaciente({
             <p className="text-xs text-foreground/50">
               PDF o foto. Queda guardado en la historia clínica del paciente.
             </p>
-            <Button type="submit" variant="secondary" className="justify-self-start">
+            <BotonEnvio variant="secondary" enCurso="Subiendo..." className="justify-self-start">
               Cargar documento
-            </Button>
+            </BotonEnvio>
           </form>
         </details>
       )}

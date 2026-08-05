@@ -48,6 +48,64 @@ async function subirArchivo(
   return path;
 }
 
+// Busca si el paciente ya está cargado. El DNI manda cuando está; si no
+// está —que es lo habitual en niños chicos— se compara apellido y nombre
+// junto con la fecha de nacimiento, para no bloquear a dos homónimos.
+//
+// Va con el cliente de servicio porque el duplicado puede estar asignado a
+// otra TO: por RLS quien da el alta no lo vería, y lo cargaría de nuevo.
+async function buscarPacienteExistente({
+  dni,
+  nombre,
+  fecha_nacimiento,
+}: {
+  dni: string | null;
+  nombre: string;
+  fecha_nacimiento: string | null;
+}) {
+  const admin = createAdminClient();
+  const columnas = "numero_registro, nombre, activo, tos(nombre)";
+
+  const soloDigitos = (dni ?? "").replace(/\D/g, "");
+  if (soloDigitos) {
+    const { data } = await admin
+      .from("pacientes")
+      .select(columnas)
+      .eq("dni", soloDigitos)
+      .maybeSingle();
+    if (data) {
+      return {
+        numero_registro: data.numero_registro,
+        nombre: data.nombre,
+        activo: data.activo,
+        // @ts-expect-error relación anidada
+        to: data.tos?.nombre as string | undefined,
+      };
+    }
+  }
+
+  // Sin fecha de nacimiento el nombre solo no alcanza para afirmar que es la
+  // misma persona, así que no se bloquea el alta.
+  const limpio = nombre.trim().toUpperCase();
+  if (!limpio || !fecha_nacimiento) return null;
+
+  const { data } = await admin
+    .from("pacientes")
+    .select(columnas)
+    .ilike("nombre", limpio)
+    .eq("fecha_nacimiento", fecha_nacimiento)
+    .maybeSingle();
+
+  if (!data) return null;
+  return {
+    numero_registro: data.numero_registro,
+    nombre: data.nombre,
+    activo: data.activo,
+    // @ts-expect-error relación anidada
+    to: data.tos?.nombre as string | undefined,
+  };
+}
+
 export async function crearPaciente(formData: FormData) {
   const usuario = await requireRole("to", "admin");
   // El alta de pacientes es exclusiva de la TO; el admin solo modifica.
@@ -66,7 +124,21 @@ export async function crearPaciente(formData: FormData) {
   const tipo = String(formData.get("tipo"));
   const nombre = String(formData.get("nombre"));
   const fecha_nacimiento = String(formData.get("fecha_nacimiento") || "") || null;
-  const dni = String(formData.get("dni") || "") || null;
+  // Se guarda solo con dígitos para que la comparación con lo ya cargado no
+  // falle por un punto de miles de diferencia.
+  const dni = String(formData.get("dni") || "").replace(/\D/g, "") || null;
+
+  // Antes de crear nada se comprueba que el paciente no esté ya cargado. La
+  // búsqueda va con el cliente de servicio a propósito: si el duplicado está
+  // asignado a otra TO, por RLS esta TO no lo vería y lo cargaría de nuevo.
+  const duplicado = await buscarPacienteExistente({ dni, nombre, fecha_nacimiento });
+  if (duplicado) {
+    throw new Error(
+      `Ese paciente ya está cargado como ${duplicado.numero_registro} — ${duplicado.nombre}` +
+        (duplicado.to ? `, a cargo de ${duplicado.to}.` : ".") +
+        (duplicado.activo === false ? " Está dado de baja: se puede reactivar en vez de crearlo otra vez." : "")
+    );
+  }
 
   // numero_registro no se manda: lo asigna el default de la tabla
   // (generar_numero_registro(), formato LETRA+4 dígitos, ej. A0001).
@@ -83,6 +155,14 @@ export async function crearPaciente(formData: FormData) {
     .single();
 
   if (error || !paciente) {
+    // 23505 es la violación de índice único: la red de seguridad de la base
+    // frente a un doble envío que le gana de mano a la comprobación previa.
+    if (error?.code === "23505") {
+      throw new Error(
+        "Ese paciente ya está cargado. Si acabás de apretar Guardar dos veces, " +
+          "revisá el listado antes de volver a intentarlo: es probable que ya esté."
+      );
+    }
     throw new Error(error?.message ?? "No se pudo crear el paciente");
   }
 

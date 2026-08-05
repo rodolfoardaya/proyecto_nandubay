@@ -1,4 +1,5 @@
 "use client";
+import { BotonEnvio } from "@/components/ui/BotonEnvio";
 
 import { useState } from "react";
 import { Button } from "./ui/Button";
@@ -122,9 +123,9 @@ export function FacturaUploadForm({ pacientes }: { pacientes: Paciente[] }) {
         equivocarse.
       </p>
 
-      <Button type="submit" variant="primary" className="justify-self-start">
+      <BotonEnvio enCurso="Guardando factura..." className="justify-self-start">
         Cargar factura
-      </Button>
+      </BotonEnvio>
     </form>
   );
 }

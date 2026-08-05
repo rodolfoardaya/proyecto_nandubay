@@ -3,10 +3,13 @@ import Image from "next/image";
 import Link from "next/link";
 import { getUsuarioActual } from "@/lib/auth";
 import { signOut } from "@/app/login/actions";
+import { VERSION } from "@/lib/version";
+import { CierrePorInactividad } from "@/components/CierrePorInactividad";
 
 const NAV: Record<string, { href: string; label: string }[]> = {
   to: [
-    { href: "/panel/to", label: "Agenda" },
+    { href: "/panel/to", label: "Inicio" },
+    { href: "/panel/to/agenda", label: "Agenda de turnos" },
     { href: "/panel/to/pacientes", label: "Pacientes" },
     { href: "/panel/to/facturacion", label: "Facturación" },
     { href: "/panel/to/backups", label: "Backups" },
@@ -14,7 +17,8 @@ const NAV: Record<string, { href: string; label: string }[]> = {
     { href: "/panel/to/reportes", label: "Reportes" },
   ],
   admin: [
-    { href: "/panel/admin", label: "Agenda" },
+    { href: "/panel/admin", label: "Inicio" },
+    { href: "/panel/admin/agenda", label: "Agenda de turnos" },
     { href: "/panel/admin/pacientes", label: "Pacientes" },
     { href: "/panel/admin/facturacion", label: "Facturación" },
     { href: "/panel/admin/backups", label: "Backups" },
@@ -87,7 +91,13 @@ export default async function PanelLayout({
           </form>
         </div>
       </aside>
-      <main className="flex-1 bg-background p-4 md:p-8">{children}</main>
+      <main className="relative flex-1 bg-background p-4 md:p-8">
+        <span className="absolute right-4 top-3 text-xs font-bold text-foreground/30">
+          {VERSION}
+        </span>
+        {children}
+      </main>
+      <CierrePorInactividad />
     </div>
   );
 }

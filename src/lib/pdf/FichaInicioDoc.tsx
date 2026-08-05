@@ -54,7 +54,15 @@ export function FichaInicioDoc({
   return (
     <Document title={`Ficha de inicio — ${paciente.nombre}`}>
       <Page size="A4" style={estilos.page}>
-        <CabeceraImpresion meta={meta} />
+        <CabeceraImpresion
+          meta={meta}
+          paciente={{
+            nombre: paciente.nombre,
+            numero_registro: paciente.numero_registro,
+            dni: paciente.dni,
+            fecha_nacimiento: paciente.fecha_nacimiento,
+          }}
+        />
         <PieConfidencial />
 
         <Membrete titulo={tituloFicha(paciente.tipo)} />

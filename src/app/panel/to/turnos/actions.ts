@@ -12,7 +12,10 @@ export async function crearTurno(formData: FormData) {
   const paciente_id = String(formData.get("paciente_id"));
   const fecha = String(formData.get("fecha"));
   const hora = String(formData.get("hora"));
-  const tipo = String(formData.get("tipo") || "fijo");
+  // La frecuencia define si el turno se repite; `tipo` se mantiene por
+  // compatibilidad con lo ya cargado.
+  const frecuencia = String(formData.get("frecuencia") || "unica");
+  const tipo = frecuencia === "unica" ? "suelto" : "fijo";
   const modalidad = String(formData.get("modalidad") || "presencial");
   const link_online = String(formData.get("link_online") || "") || null;
 
@@ -32,6 +35,7 @@ export async function crearTurno(formData: FormData) {
       fecha,
       hora,
       tipo,
+      frecuencia,
       modalidad,
       link_online,
       estado: "confirmado",
