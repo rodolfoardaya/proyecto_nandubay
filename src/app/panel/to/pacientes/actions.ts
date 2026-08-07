@@ -41,11 +41,26 @@ async function subirArchivo(
 ): Promise<string | null> {
   if (!archivo || archivo.size === 0) return null;
 
-  const path = `${carpeta}/${Date.now()}-${archivo.name}`;
-  const { error } = await supabase.storage.from("documentos").upload(path, archivo);
+  const path = `${carpeta}/${Date.now()}-${nombreSeguro(archivo.name)}`;
+  const { error } = await supabase.storage.from("documentos").upload(path, archivo, {
+    contentType: archivo.type || "application/octet-stream",
+  });
   if (error) throw new Error(error.message);
 
   return path;
+}
+
+// Storage rechaza claves con acentos, espacios o signos. El nombre original
+// del archivo se guarda aparte en la base, así que acá sólo hace falta que
+// sea una ruta válida.
+function nombreSeguro(nombre: string) {
+  const limpio = nombre
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "") // saca las tildes
+    .replace(/[^a-zA-Z0-9._-]/g, "-")
+    .replace(/-+/g, "-")
+    .slice(-80);
+  return limpio || "archivo";
 }
 
 // Busca si el paciente ya está cargado. El DNI manda cuando está; si no

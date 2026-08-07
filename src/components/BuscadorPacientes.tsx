@@ -1,9 +1,9 @@
 import { Button } from "@/components/ui/Button";
 
-// La consulta de una historia clínica exige la coincidencia de al menos dos
-// datos del paciente (ej. DNI + apellido, o DNI + Nº de paciente), para que
-// nadie abra una historia por tanteo con un solo dato.
-export const MINIMO_CRITERIOS = 2;
+// Para consultar alcanza con un dato: quien busca ya entró al sistema y
+// tiene permiso sobre esos pacientes. El control de dos coincidencias se
+// mantiene en el ALTA, que es donde importa no duplicar una historia.
+export const MINIMO_CRITERIOS = 1;
 
 export type CriteriosBusqueda = {
   nro: string;
@@ -39,7 +39,7 @@ export function BuscadorPacientes({
     <form action={base} className="mt-4 rounded-2xl bg-white p-5 shadow-sm">
       <p className="font-bold text-green-dark">Buscar una historia clínica</p>
       <p className="mt-1 text-xs text-foreground/60">
-        Completá al menos dos datos del paciente para abrir su historia.
+        Buscá por número de registro, DNI o apellido y nombre.
       </p>
       <div className="mt-3 grid gap-3 sm:grid-cols-3">
         <label className="text-xs font-semibold text-foreground/70">
@@ -66,7 +66,7 @@ export function BuscadorPacientes({
         )}
         {cantidad === 1 && (
           <span className="text-xs font-semibold text-orange">
-            Falta un dato más: la búsqueda necesita dos coincidencias.
+            Completá al menos un dato para buscar.
           </span>
         )}
       </div>

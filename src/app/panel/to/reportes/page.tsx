@@ -1,11 +1,12 @@
 import { requireRole } from "@/lib/auth";
 import { Card } from "@/components/ui/Card";
+import { FormularioReporteSeguimiento } from "@/components/FormularioReporteSeguimiento";
 
 export default async function Reportes() {
   await requireRole("to", "admin");
 
   return (
-    <div className="max-w-xl">
+    <div className="max-w-2xl">
       <h1 className="text-2xl font-extrabold text-green-dark">Reportes de turnos</h1>
 
       <div className="mt-6 grid gap-4 sm:grid-cols-2">
@@ -28,6 +29,15 @@ export default async function Reportes() {
           </a>
         </Card>
       </div>
+
+      <section className="mt-8 rounded-2xl bg-white p-5 shadow-sm">
+        <h2 className="font-bold text-green-dark">Seguimiento: ausencias y cobros</h2>
+        <p className="mt-1 mb-4 text-sm text-foreground/60">
+          Elegí el período y qué querés listar. Para cerrar el mes, la
+          combinación útil es <b>Adeudados</b> del 1 al último día.
+        </p>
+        <FormularioReporteSeguimiento />
+      </section>
     </div>
   );
 }

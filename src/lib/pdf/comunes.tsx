@@ -164,9 +164,12 @@ export function PieConfidencial() {
       <Text style={estilos.pie}>
         Documento clínico confidencial — Ley 26.529 y Ley 25.326. Uso exclusivo profesional.
       </Text>
+      {/* `fixed` va también en el propio Text: sin eso el número se calcula
+          una sola vez y se repite igual en todas las hojas. */}
       <Text
+        fixed
         style={estilos.pieNumero}
-        render={({ pageNumber, totalPages }) => `${pageNumber}/${totalPages}`}
+        render={({ pageNumber, totalPages }) => `Hoja ${pageNumber} de ${totalPages}`}
       />
     </View>
   );

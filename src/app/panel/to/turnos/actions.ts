@@ -3,7 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { requireRole } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
-import { crearEventoCalendar, eliminarEventoCalendar } from "@/lib/google-calendar";
+import { registrarAuditoria } from "@/lib/auditoria";
+import { crearEventoCalendar, eliminarEventoCalendar, actualizarEventoCalendar } from "@/lib/google-calendar";
 
 export async function crearTurno(formData: FormData) {
   const usuario = await requireRole("to", "admin");
@@ -16,6 +17,11 @@ export async function crearTurno(formData: FormData) {
   // compatibilidad con lo ya cargado.
   const frecuencia = String(formData.get("frecuencia") || "unica");
   const tipo = frecuencia === "unica" ? "suelto" : "fijo";
+  // La duración es variable y se agenda de a 5 minutos.
+  const duracion_minutos = Math.max(5, Math.round(Number(formData.get("duracion_minutos") || 45) / 5) * 5);
+  // Una serie semanal se programa hasta el 31/12 del año en que empieza: sin
+  // tope arrastraba a los años siguientes agendas que ya no corresponden.
+  const fecha_fin = frecuencia === "semanal" ? fecha.slice(0, 4) + "-12-31" : null;
   const modalidad = String(formData.get("modalidad") || "presencial");
   const link_online = String(formData.get("link_online") || "") || null;
 
@@ -36,6 +42,8 @@ export async function crearTurno(formData: FormData) {
       hora,
       tipo,
       frecuencia,
+      duracion_minutos,
+      fecha_fin,
       modalidad,
       link_online,
       estado: "confirmado",
@@ -48,7 +56,9 @@ export async function crearTurno(formData: FormData) {
   const googleEventId = await crearEventoCalendar({
     fecha,
     hora,
-    duracionMinutos: 45,
+    duracionMinutos: duracion_minutos,
+    frecuencia: frecuencia as "unica" | "semanal",
+    hasta: fecha_fin,
     pacienteNombre: paciente.nombre,
     modalidad: modalidad as "presencial" | "online",
     /* @ts-expect-error relación anidada */
@@ -96,4 +106,64 @@ export async function cancelarTurno(formData: FormData) {
   revalidatePath("/panel/to");
   revalidatePath("/panel/admin");
   revalidatePath(`/panel/${usuario.rol}`);
+}
+
+// Editar un turno ya cargado: fecha, hora, duración, frecuencia y modalidad.
+// Antes sólo se podía crear o cancelar, así que corregir una duración
+// obligaba a borrar y volver a tipear todo.
+export async function actualizarTurno(formData: FormData) {
+  const usuario = await requireRole("to", "admin");
+  const supabase = await createClient();
+
+  const turno_id = String(formData.get("turno_id"));
+  const fecha = String(formData.get("fecha"));
+  const hora = String(formData.get("hora"));
+  const frecuencia = String(formData.get("frecuencia") || "unica");
+  const modalidad = String(formData.get("modalidad") || "presencial");
+  const duracion_minutos = Math.max(
+    5,
+    Math.round(Number(formData.get("duracion_minutos") || 45) / 5) * 5
+  );
+  const fecha_fin = frecuencia === "semanal" ? fecha.slice(0, 4) + "-12-31" : null;
+
+  const { data: actual } = await supabase
+    .from("turnos")
+    .select("google_event_id, pacientes(nombre), tos(nombre)")
+    .eq("id", turno_id)
+    .single();
+
+  const { error } = await supabase
+    .from("turnos")
+    .update({
+      fecha,
+      hora,
+      duracion_minutos,
+      frecuencia,
+      fecha_fin,
+      modalidad,
+      tipo: frecuencia === "unica" ? "suelto" : "fijo",
+    })
+    .eq("id", turno_id);
+
+  if (error) throw new Error(error.message);
+
+  const nuevoEventoId = await actualizarEventoCalendar(actual?.google_event_id ?? null, {
+    fecha,
+    hora,
+    duracionMinutos: duracion_minutos,
+    /* @ts-expect-error relación anidada */
+    pacienteNombre: actual?.pacientes?.nombre ?? "Paciente",
+    modalidad: modalidad as "presencial" | "online",
+    /* @ts-expect-error relación anidada */
+    toNombre: actual?.tos?.nombre ?? "TO",
+    frecuencia: frecuencia as "unica" | "semanal",
+    hasta: fecha_fin,
+  });
+
+  if (nuevoEventoId && nuevoEventoId !== actual?.google_event_id) {
+    await supabase.from("turnos").update({ google_event_id: nuevoEventoId }).eq("id", turno_id);
+  }
+
+  await registrarAuditoria("edicion_turno", `${turno_id} — ${fecha} ${hora}, ${duracion_minutos} min`);
+  revalidatePath(`/panel/${usuario.rol}/agenda`);
 }

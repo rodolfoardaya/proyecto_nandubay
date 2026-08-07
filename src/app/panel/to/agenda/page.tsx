@@ -58,7 +58,7 @@ export default async function Agenda({ searchParams }: { searchParams: Params })
   // meses sigue cayendo esta semana, y filtrar por fecha lo dejaría afuera.
   const { data: turnosRaw } = await supabase
     .from("turnos")
-    .select("id, fecha, hora, estado, modalidad, frecuencia, fecha_fin, paciente_id, pacientes(nombre)")
+    .select("id, fecha, hora, estado, modalidad, frecuencia, fecha_fin, duracion_minutos, paciente_id, pacientes(nombre)")
     .eq("to_id", toId)
     .lte("fecha", hasta);
 
@@ -70,6 +70,7 @@ export default async function Agenda({ searchParams }: { searchParams: Params })
     modalidad: t.modalidad,
     frecuencia: (t.frecuencia ?? "unica") as Turno["frecuencia"],
     fecha_fin: t.fecha_fin,
+    duracion_minutos: t.duracion_minutos ?? 45,
     paciente_id: t.paciente_id,
     // @ts-expect-error relación anidada
     paciente: t.pacientes?.nombre ?? "—",
@@ -83,16 +84,26 @@ export default async function Agenda({ searchParams }: { searchParams: Params })
 
   const turnos = ocurrenciasEn(series, desde, hasta, excepciones ?? []);
 
+  // Seguimiento de cada fecha: asistencia y cobro.
+  const { data: seguimientosRaw } = await supabase
+    .from("turnos_seguimiento")
+    .select("turno_id, fecha, asistencia, pago, observacion_asistencia, observacion_pago")
+    .gte("fecha", desde)
+    .lte("fecha", hasta);
+
+  const seguimientos = new Map(
+    (seguimientosRaw ?? []).map((s) => [`${s.turno_id}|${s.fecha}`, s])
+  );
+
   // Lo cancelado en el rango, para mostrarlo abajo en vez de en la grilla.
   const porId = new Map(series.map((s) => [s.id, s]));
   const canceladosDelDia = (excepciones ?? [])
     .map((e) => ({ ...e, serie: porId.get(e.turno_id) }))
     .filter((e) => e.serie);
-  const seriesCanceladas = series.filter((s) => s.estado === "cancelado");
 
   const { data: bloqueosRaw } = await supabase
     .from("bloqueos_agenda")
-    .select("id, motivo, tipo, fecha_desde, fecha_hasta, hora_desde, hora_hasta")
+    .select("id, motivo, tipo, fecha_desde, fecha_hasta, hora_desde, hora_hasta, frecuencia")
     .eq("to_id", toId)
     .lte("fecha_desde", hasta)
     .gte("fecha_hasta", desde)
@@ -189,24 +200,30 @@ export default async function Agenda({ searchParams }: { searchParams: Params })
         turnos={turnos}
         bloqueos={bloqueos}
         base={base}
+        seguimientos={seguimientos}
       />
 
-      <p className="mt-2 text-xs text-foreground/50">
-        Las casillas en blanco están libres. Las verdes tienen turno; las
-        naranjas, un bloqueo.
-      </p>
+      <div className="mt-2 flex flex-wrap items-center gap-3">
+        <p className="text-xs text-foreground/50">
+          Las casillas en blanco están libres. Las verdes tienen turno; las
+          naranjas, un bloqueo.
+        </p>
+        <Link
+          href={`${base}/reportes`}
+          className="ml-auto rounded-full border border-black/10 px-4 py-2 text-xs font-bold text-blue-mid hover:bg-blue-light/20"
+        >
+          Reporte de ausencias y cobros →
+        </Link>
+      </div>
 
       {/* Turnos cancelados: salen de la grilla y quedan acá, para que no se
           pierda el registro de que ese día había turno. */}
-      {(canceladosDelDia.length > 0 || seriesCanceladas.length > 0) && (
+      {canceladosDelDia.length > 0 && (
         <section className="mt-6 rounded-2xl bg-white p-5 shadow-sm">
-          <h2 className="font-bold text-green-dark">Turnos cancelados</h2>
+          <h2 className="font-bold text-green-dark">Turnos cancelados en esta fecha</h2>
 
           {canceladosDelDia.length > 0 && (
             <>
-              <p className="mt-2 text-xs font-semibold uppercase text-foreground/50">
-                Cancelados sólo ese día
-              </p>
               <ul className="mt-1 divide-y divide-black/5">
                 {canceladosDelDia.map((c) => (
                   <li key={`${c.turno_id}-${c.fecha}`} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2 text-sm">
@@ -228,24 +245,6 @@ export default async function Agenda({ searchParams }: { searchParams: Params })
             </>
           )}
 
-          {seriesCanceladas.length > 0 && (
-            <>
-              <p className="mt-4 text-xs font-semibold uppercase text-foreground/50">
-                Series canceladas por completo
-              </p>
-              <ul className="mt-1 divide-y divide-black/5">
-                {seriesCanceladas.map((s) => (
-                  <li key={s.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2 text-sm">
-                    <span className="font-semibold text-green-dark">{s.paciente}</span>
-                    <span className="text-foreground/60">
-                      {s.hora.slice(0, 5)} · {s.frecuencia}
-                    </span>
-                    <span className="text-xs text-foreground/50">desde {s.fecha}</span>
-                  </li>
-                ))}
-              </ul>
-            </>
-          )}
         </section>
       )}
 

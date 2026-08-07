@@ -80,15 +80,27 @@ export default async function TurnosDelPaciente({
           <input type="hidden" name="paciente_id" value={id} />
           <div className="grid grid-cols-2 gap-3">
             <input required type="date" name="fecha" defaultValue={hoy} className={CAMPO} />
-            {/* Franjas de 15 minutos, como en la grilla de la agenda. */}
-            <input required type="time" name="hora" step={900} className={CAMPO} />
+            {/* De a 5 minutos, que es la unidad mínima de la agenda. */}
+            <input required type="time" name="hora" step={300} className={CAMPO} />
           </div>
+          <label className="grid gap-1 text-xs font-semibold text-foreground/70">
+            Duración del turno (minutos)
+            <input
+              required
+              type="number"
+              name="duracion_minutos"
+              defaultValue={45}
+              min={5}
+              max={480}
+              step={5}
+              className={CAMPO}
+            />
+          </label>
           <div className="grid grid-cols-2 gap-3">
             <select name="frecuencia" className={CAMPO}>
               <option value="unica">Una sola vez</option>
-              <option value="semanal">Todas las semanas</option>
-              <option value="quincenal">Cada 15 días</option>
-            </select>
+              <option value="semanal">Todas las semanas (hasta el 31/12)</option>
+              </select>
             <select name="modalidad" className={CAMPO}>
               <option value="presencial">Presencial</option>
               <option value="online">Online</option>

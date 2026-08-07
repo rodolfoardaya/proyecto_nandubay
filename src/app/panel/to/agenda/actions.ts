@@ -19,6 +19,7 @@ export async function crearBloqueo(formData: FormData) {
   const fecha_desde = String(formData.get("fecha_desde") || "");
   const fecha_hasta = String(formData.get("fecha_hasta") || "") || fecha_desde;
   const todoElDia = formData.get("todo_el_dia") === "on";
+  const frecuencia = String(formData.get("frecuencia") || "unica");
   const paraTodas = formData.get("para_todas") === "on";
   const toElegida = String(formData.get("to_id") || "");
 
@@ -52,6 +53,7 @@ export async function crearBloqueo(formData: FormData) {
       tipo,
       fecha_desde,
       fecha_hasta,
+      frecuencia,
       hora_desde,
       hora_hasta,
       creado_por: usuario.id,
@@ -136,5 +138,40 @@ export async function reactivarFecha(formData: FormData) {
   if (error) throw new Error(error.message);
 
   await registrarAuditoria("reactivacion_turno_fecha", `turno ${turno_id} — ${fecha}`);
+  revalidatePath(`/panel/${usuario.rol}/agenda`);
+}
+
+// Seguimiento de una fecha puntual del turno: si el paciente vino y cómo
+// quedó el cobro, cada uno con su nota. Va por fecha porque un turno semanal
+// es una sola fila que se repite.
+export async function registrarSeguimiento(formData: FormData) {
+  const usuario = await requireRole("to", "admin");
+  const supabase = await createClient();
+
+  const turno_id = String(formData.get("turno_id"));
+  const fecha = String(formData.get("fecha"));
+  const asistencia = String(formData.get("asistencia") || "") || null;
+  const pago = String(formData.get("pago") || "") || null;
+
+  const { error } = await supabase.from("turnos_seguimiento").upsert(
+    {
+      turno_id,
+      fecha,
+      asistencia,
+      pago,
+      observacion_asistencia: String(formData.get("observacion_asistencia") || "").trim() || null,
+      observacion_pago: String(formData.get("observacion_pago") || "").trim() || null,
+      registrado_por: usuario.id,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: "turno_id,fecha" }
+  );
+
+  if (error) throw new Error(error.message);
+
+  await registrarAuditoria(
+    "seguimiento_turno",
+    `${fecha} — ${asistencia ?? "sin asistencia"} / ${pago ?? "sin pago"}`
+  );
   revalidatePath(`/panel/${usuario.rol}/agenda`);
 }

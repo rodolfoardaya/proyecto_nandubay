@@ -26,6 +26,7 @@ export function FormularioBloqueo({
   fechaSugerida: string;
 }) {
   const [todoElDia, setTodoElDia] = useState(true);
+  const [frecuencia, setFrecuencia] = useState("unica");
 
   return (
     <details className="mt-4">
@@ -46,14 +47,38 @@ export function FormularioBloqueo({
           ))}
         </select>
 
+        <label className="grid gap-1 text-xs font-semibold text-foreground/70">
+          ¿Se repite?
+          <select
+            name="frecuencia"
+            value={frecuencia}
+            onChange={(e) => setFrecuencia(e.target.value)}
+            className={CAMPO}
+          >
+            <option value="unica">No, es por única vez</option>
+            <option value="semanal">Todas las semanas, el mismo día</option>
+            <option value="mensual">Todos los meses, el mismo día</option>
+          </select>
+          {frecuencia === "mensual" && (
+            <span className="text-xs font-normal text-foreground/60">
+              Para reservarte tiempo fijo, por ejemplo para escribir informes.
+            </span>
+          )}
+        </label>
+
         <div className="grid gap-3 sm:grid-cols-2">
           <label className="grid gap-1 text-xs font-semibold text-foreground/70">
-            Desde
+            {frecuencia === "unica" ? "Desde" : "Primera vez"}
             <input required type="date" name="fecha_desde" defaultValue={fechaSugerida} className={CAMPO} />
           </label>
           <label className="grid gap-1 text-xs font-semibold text-foreground/70">
-            Hasta (si es un solo día, dejalo igual)
-            <input type="date" name="fecha_hasta" defaultValue={fechaSugerida} className={CAMPO} />
+            {frecuencia === "unica" ? "Hasta (si es un solo día, dejalo igual)" : "Repetir hasta"}
+            <input
+              type="date"
+              name="fecha_hasta"
+              defaultValue={frecuencia === "unica" ? fechaSugerida : `${fechaSugerida.slice(0, 4)}-12-31`}
+              className={CAMPO}
+            />
           </label>
         </div>
 

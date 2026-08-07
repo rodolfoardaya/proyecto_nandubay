@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { EditarTurno } from "@/components/EditarTurno";
+import { SeguimientoTurno, resumenSeguimiento, type Seguimiento } from "@/components/SeguimientoTurno";
 import { cancelarUnaFecha, cancelarSerie } from "@/app/panel/to/agenda/actions";
 import {
   DIAS,
@@ -9,13 +11,15 @@ import {
   formatoCorto,
   horariosDe,
   seAtiende,
-  turnoEn,
+  filasQueOcupa,
+  mapaDeOcupacion,
   type Bloqueo,
   type Franja,
   type Ocurrencia,
 } from "@/lib/agenda";
 
-// Grilla de la agenda: una fila cada 15 minutos y una columna por día.
+// Grilla de la agenda: una fila cada 5 minutos y una columna por día. Cada
+// turno ocupa tantas filas como dure.
 // Las casillas ocupadas muestran el nombre del paciente; las libres quedan en
 // blanco, que es como se lee de un vistazo dónde hay lugar.
 export function AgendaGrilla({
@@ -24,14 +28,17 @@ export function AgendaGrilla({
   turnos,
   bloqueos,
   base,
+  seguimientos,
 }: {
   fechas: string[];
   franja: Franja;
   turnos: Ocurrencia[];
   bloqueos: Bloqueo[];
   base: string;
+  seguimientos: Map<string, Seguimiento>;
 }) {
   const horarios = horariosDe(franja);
+  const { inicio, tapada } = mapaDeOcupacion(turnos, horarios);
   const visibles = fechas.filter((f) => seAtiende(f, franja));
 
   if (visibles.length === 0) {
@@ -61,19 +68,24 @@ export function AgendaGrilla({
         </thead>
         <tbody>
           {horarios.map((hora) => {
-            // Marca la hora en punto para poder seguir la grilla con la vista.
+            // Con filas de 5 minutos, rotular todas satura: sólo se escriben
+            // los cuartos de hora, que es lo que sirve para ubicarse.
             const enPunto = hora.endsWith(":00");
+            const enCuarto = ["00", "15", "30", "45"].includes(hora.slice(3));
             return (
               <tr key={hora} className={enPunto ? "border-t border-black/10" : ""}>
                 <td
-                  className={`sticky left-0 z-10 bg-white px-2 py-1 tabular-nums ${
+                  className={`sticky left-0 z-10 bg-white px-2 py-0.5 tabular-nums ${
                     enPunto ? "font-bold text-foreground/70" : "text-foreground/35"
                   }`}
                 >
-                  {hora}
+                  {enCuarto ? hora : ""}
                 </td>
 
                 {visibles.map((fecha) => {
+                  // Fila tapada por un turno que empezó más arriba.
+                  if (tapada.has(`${fecha}|${hora}`)) return null;
+
                   const bloqueo = bloqueoEn(bloqueos, fecha, hora);
                   if (bloqueo) {
                     return (
@@ -89,11 +101,12 @@ export function AgendaGrilla({
                     );
                   }
 
-                  const turno = turnoEn(turnos, fecha, hora);
+                  const turno = inicio.get(`${fecha}|${hora}`) ?? null;
                   return (
                     <td
                       key={fecha}
-                      className={`border-l border-black/5 px-2 py-1 ${
+                      rowSpan={turno ? filasQueOcupa(turno.duracion_minutos) : undefined}
+                      className={`border-l border-black/5 px-2 py-0.5 align-top ${
                         turno ? "bg-green-light/25" : ""
                       }`}
                     >
@@ -103,7 +116,7 @@ export function AgendaGrilla({
                             {turno.paciente}
                             {turno.frecuencia !== "unica" && (
                               <span className="ml-1 font-normal text-foreground/40">
-                                {turno.frecuencia === "semanal" ? "↻" : "↻15"}
+                                ↻
                               </span>
                             )}
                             {turno.estado !== "confirmado" && (
@@ -111,6 +124,10 @@ export function AgendaGrilla({
                                 ({turno.estado})
                               </span>
                             )}
+                            {(() => {
+                              const r = resumenSeguimiento(seguimientos.get(`${turno.id}|${fecha}`));
+                              return r ? <span className="block font-normal text-[10px] text-foreground/50">{r}</span> : null;
+                            })()}
                           </summary>
 
                           <div className="mt-1 grid gap-1 rounded-lg bg-white p-2 shadow-md">
@@ -137,6 +154,21 @@ export function AgendaGrilla({
                                 </button>
                               </form>
                             )}
+
+                            <EditarTurno
+                              turnoId={turno.id}
+                              fecha={turno.fecha}
+                              hora={aHHMM(turno.hora)}
+                              duracionMinutos={turno.duracion_minutos}
+                              frecuencia={turno.frecuencia}
+                              modalidad={turno.modalidad}
+                            />
+
+                            <SeguimientoTurno
+                              turnoId={turno.id}
+                              fecha={fecha}
+                              seguimiento={seguimientos.get(`${turno.id}|${fecha}`)}
+                            />
                           </div>
                         </details>
                       )}

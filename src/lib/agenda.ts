@@ -1,7 +1,7 @@
 // Reglas de la agenda del consultorio.
 //
 // Se atiende de lunes a viernes en dos franjas, y los sábados sólo por la
-// mañana. La unidad mínima es de 15 minutos.
+// mañana. Los domingos no se atiende. La unidad mínima es de 5 minutos.
 //
 // Las fechas se manejan como texto "AAAA-MM-DD" en vez de objetos Date: al
 // convertir de un lado a otro, la zona horaria corre el día y los turnos
@@ -15,7 +15,9 @@ export const FRANJAS: Record<Franja, { etiqueta: string; desde: string; hasta: s
   tarde: { etiqueta: "Tarde", desde: "15:00", hasta: "21:00" },
 };
 
-export const PASO_MINUTOS = 15;
+// La agenda se divide cada 5 minutos: es la unidad mínima con la que se
+// reserva, y un turno puede empezar a las 8:05 o durar 25 minutos.
+export const PASO_MINUTOS = 5;
 
 export const DIAS = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
 
@@ -118,7 +120,7 @@ export function nombreDelMes(fechaIso: string) {
 
 // ── Ocupación ──────────────────────────────────────────────────────────────
 
-export type Frecuencia = "unica" | "semanal" | "quincenal";
+export type Frecuencia = "unica" | "semanal";
 
 // Un turno es la definición de una serie: primera fecha, hora y cada cuánto
 // se repite. Las repeticiones no se guardan como filas, se calculan.
@@ -132,6 +134,7 @@ export type Turno = {
   paciente_id: string;
   frecuencia: Frecuencia;
   fecha_fin: string | null;
+  duracion_minutos: number;
 };
 
 // Una ocurrencia concreta: el turno tal como cae en una fecha puntual.
@@ -140,7 +143,6 @@ export type Ocurrencia = Turno & { fechaOcurrencia: string };
 const DIAS_DE_SALTO: Record<Frecuencia, number> = {
   unica: 0,
   semanal: 7,
-  quincenal: 14,
 };
 
 // Expande cada serie sobre el rango visible, salteando las fechas canceladas
@@ -192,6 +194,10 @@ function diasEntre(desde: string, hasta: string) {
   return Math.round(ms / 86400000);
 }
 
+// Los bloqueos también pueden repetirse: el caso de uso es el rato que la
+// TO se reserva cada mes para escribir informes.
+export type FrecuenciaBloqueo = "unica" | "semanal" | "mensual";
+
 export type Bloqueo = {
   id: string;
   motivo: string;
@@ -200,6 +206,7 @@ export type Bloqueo = {
   fecha_hasta: string;
   hora_desde: string | null;
   hora_hasta: string | null;
+  frecuencia?: FrecuenciaBloqueo;
 };
 
 // La hora viene de Postgres como "HH:MM:SS"; en la grilla se compara "HH:MM".
@@ -213,12 +220,49 @@ export function turnoEn(ocurrencias: Ocurrencia[], fecha: string, hora: string) 
   );
 }
 
+// ¿Ese día cae dentro del bloqueo? Para los que se repiten, `fecha_desde` y
+// `fecha_hasta` marcan el período en que la repetición sigue vigente, y el
+// día concreto lo define la frecuencia: el mismo día de la semana, o el mismo
+// día del mes.
+function diaAlcanzado(b: Bloqueo, fecha: string) {
+  if (fecha < b.fecha_desde || fecha > b.fecha_hasta) return false;
+
+  const frecuencia = b.frecuencia ?? "unica";
+  if (frecuencia === "semanal") return diaDeSemana(fecha) === diaDeSemana(b.fecha_desde);
+  if (frecuencia === "mensual") return fecha.slice(8) === b.fecha_desde.slice(8);
+  return true; // única: todo el rango queda bloqueado
+}
+
 export function bloqueoEn(bloqueos: Bloqueo[], fecha: string, hora: string) {
   return (
     bloqueos.find((b) => {
-      if (fecha < b.fecha_desde || fecha > b.fecha_hasta) return false;
+      if (!diaAlcanzado(b, fecha)) return false;
       if (!b.hora_desde || !b.hora_hasta) return true; // día entero
       return hora >= aHHMM(b.hora_desde) && hora < aHHMM(b.hora_hasta);
     }) ?? null
   );
+}
+
+// Cuántas filas de la grilla ocupa un turno según su duración.
+export function filasQueOcupa(duracionMinutos: number) {
+  return Math.max(1, Math.round((duracionMinutos || PASO_MINUTOS) / PASO_MINUTOS));
+}
+
+// Índice de la grilla: para cada día, en qué fila empieza cada turno y qué
+// filas quedan tapadas por uno que ya empezó más arriba.
+export function mapaDeOcupacion(ocurrencias: Ocurrencia[], horarios: string[]) {
+  const inicio = new Map<string, Ocurrencia>();
+  const tapada = new Set<string>();
+
+  for (const t of ocurrencias) {
+    const hora = aHHMM(t.hora);
+    const desde = horarios.indexOf(hora);
+    if (desde < 0) continue; // cae fuera de la franja que se está mirando
+    inicio.set(`${t.fechaOcurrencia}|${hora}`, t);
+    const filas = filasQueOcupa(t.duracion_minutos);
+    for (let i = 1; i < filas && desde + i < horarios.length; i++) {
+      tapada.add(`${t.fechaOcurrencia}|${horarios[desde + i]}`);
+    }
+  }
+  return { inicio, tapada };
 }
