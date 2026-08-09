@@ -37,13 +37,19 @@ function normalizarClave(bruta: string) {
     .replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----/, "")
     .replace(/-----END [A-Z ]*PRIVATE KEY-----/, "");
 
+  // El base64 sólo usa letras, números, "+", "/" y "=". Cualquier otra cosa
+  // que haya metido el panel —saltos, barras invertidas de un escape doble,
+  // comillas— sobra y se descarta.
+  const soloBase64 = (s: string) => s.replace(/[^A-Za-z0-9+/=]/g, "");
+
   const candidatas = [
     // 1. Tal cual vino, si ya era un PEM bien formado.
     k,
-    // 2. Reconstruido sacando todo el espacio en blanco.
-    armarPem(crudo.replace(/\s+/g, ""), tipo),
-    // 3. Igual, pero devolviendo los "+" que el panel convirtió en espacios.
-    armarPem(crudo.replace(/[ \t]/g, "+").replace(/[\r\n]/g, ""), tipo),
+    // 2. Reconstruido con el contenido limpio.
+    armarPem(soloBase64(crudo), tipo),
+    // 3. Igual, pero devolviendo antes los "+" que algún panel convierte en
+    //    espacios al tratar el valor como una URL.
+    armarPem(soloBase64(crudo.replace(/[ \t]/g, "+")), tipo),
   ];
 
   for (const c of candidatas) {
