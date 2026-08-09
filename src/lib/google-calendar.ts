@@ -8,18 +8,69 @@ import { google } from "googleapis";
 
 const CALENDAR_ID = process.env.GOOGLE_CALENDAR_ID;
 
+// La clave privada llega distinta según de dónde se cargue: en `.env.local`
+// el archivo saca las comillas solas, pero el panel del hosting guarda el
+// valor tal cual se pega, comillas incluidas. Con la comilla adelante,
+// OpenSSL no encuentra el encabezado y falla con "no start line".
+function normalizarClave(bruta: string) {
+  let k = bruta.trim();
+  if ((k.startsWith('"') && k.endsWith('"')) || (k.startsWith("'") && k.endsWith("'"))) {
+    k = k.slice(1, -1);
+  }
+  // Los \n pueden venir literales (un archivo .env) o ya como saltos reales
+  // (si el panel los interpretó): las dos formas terminan igual.
+  return k.replace(/\\n/g, "\n").trim();
+}
+
 function getCalendarClient() {
   const email = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
   const key = process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY;
-  if (!email || !key || !CALENDAR_ID) return null;
 
-  const auth = new google.auth.JWT({
-    email,
-    key: key.replace(/\\n/g, "\n"),
-    scopes: ["https://www.googleapis.com/auth/calendar"],
-  });
+  if (!email || !key || !CALENDAR_ID) {
+    console.warn(
+      "[calendar] sin sincronizar: faltan GOOGLE_SERVICE_ACCOUNT_EMAIL, GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY o GOOGLE_CALENDAR_ID en este servidor."
+    );
+    return null;
+  }
 
-  return google.calendar({ version: "v3", auth });
+  const clave = normalizarClave(key);
+  if (!clave.startsWith("-----BEGIN")) {
+    console.error(
+      "[calendar] GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY no arranca con -----BEGIN. " +
+        `Empieza con: ${JSON.stringify(clave.slice(0, 20))}`
+    );
+    return null;
+  }
+
+  try {
+    const auth = new google.auth.JWT({
+      email,
+      key: clave,
+      scopes: ["https://www.googleapis.com/auth/calendar"],
+    });
+    return google.calendar({ version: "v3", auth });
+  } catch (e) {
+    // Una clave mal pegada (sin los \n, o cortada) rompe acá. Antes eso
+    // tiraba abajo el alta del turno entero; ahora sólo se pierde la
+    // sincronización, que es lo secundario.
+    console.error(
+      "[calendar] la clave privada no se pudo leer — revisar GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY:",
+      (e as Error).message
+    );
+    return null;
+  }
+}
+
+// Ninguna falla de Google puede impedir guardar un turno: la agenda del
+// sistema es la fuente, el calendario es un reflejo.
+async function sinRomper<T>(que: string, fn: () => Promise<T>): Promise<T | null> {
+  try {
+    return await fn();
+  } catch (e) {
+    const err = e as Error & { errors?: { message?: string }[] };
+    console.error(`[calendar] ${que} falló:`, err.errors?.[0]?.message ?? err.message);
+    return null;
+  }
 }
 
 const ZONA = "America/Argentina/Tucuman";
@@ -62,20 +113,24 @@ export async function crearEventoCalendar(turno: TurnoEvento): Promise<string | 
         ]
       : undefined;
 
-  const { data } = await calendar.events.insert({
-    calendarId: CALENDAR_ID!,
-    requestBody: {
-      summary: `${turno.pacienteNombre} — ${turno.toNombre}`,
-      description: `Turno ${turno.modalidad} — Ñandubay`,
-      // La hora va como texto local con su zona: sin convertir a UTC, no
-      // depende de dónde esté corriendo el servidor.
-      start: { dateTime: `${turno.fecha}T${turno.hora}:00`, timeZone: ZONA },
-      end: { dateTime: `${turno.fecha}T${horaFin}:00`, timeZone: ZONA },
-      recurrence: recurrencia,
-    },
-  });
+  const data = await sinRomper("crear el evento", () =>
+    calendar.events
+      .insert({
+        calendarId: CALENDAR_ID!,
+        requestBody: {
+          summary: `${turno.pacienteNombre} — ${turno.toNombre}`,
+          description: `Turno ${turno.modalidad} — Ñandubay`,
+          // La hora va como texto local con su zona: sin convertir a UTC, no
+          // depende de dónde esté corriendo el servidor.
+          start: { dateTime: `${turno.fecha}T${turno.hora}:00`, timeZone: ZONA },
+          end: { dateTime: `${turno.fecha}T${horaFin}:00`, timeZone: ZONA },
+          recurrence: recurrencia,
+        },
+      })
+      .then((r) => r.data)
+  );
 
-  return data.id ?? null;
+  return data?.id ?? null;
 }
 
 export async function eliminarEventoCalendar(googleEventId: string) {
@@ -116,7 +171,7 @@ export async function actualizarEventoCalendar(
         description: `Turno ${turno.modalidad} — Ñandubay`,
         start: { dateTime: `${turno.fecha}T${turno.hora}:00`, timeZone: ZONA },
         end: { dateTime: `${turno.fecha}T${horaFin}:00`, timeZone: ZONA },
-        recurrence: recurrencia ?? null,
+        recurrence: recurrencia ?? [],
       },
     });
     return googleEventId;
