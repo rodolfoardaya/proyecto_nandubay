@@ -1,3 +1,4 @@
+import { createPrivateKey } from "node:crypto";
 import { google } from "googleapis";
 
 // Sincroniza turnos con el Google Calendar de espacionandubay@gmail.com.
@@ -12,28 +13,59 @@ const CALENDAR_ID = process.env.GOOGLE_CALENDAR_ID;
 // el archivo saca las comillas solas, pero el panel del hosting guarda el
 // valor tal cual se pega, comillas incluidas. Con la comilla adelante,
 // OpenSSL no encuentra el encabezado y falla con "no start line".
+function armarPem(cuerpo: string, tipo: string) {
+  const lineas = cuerpo.match(/.{1,64}/g) ?? [];
+  return `-----BEGIN ${tipo}-----\n${lineas.join("\n")}\n-----END ${tipo}-----\n`;
+}
+
+// Cada panel guarda la clave de una forma distinta, y algunas la rompen:
+// unos dejan las comillas, otros se comen los saltos de línea, y otros la
+// tratan como una URL y convierten los "+" del base64 en espacios.
+//
+// En vez de adivinar cuál fue, se arman todas las variantes posibles y se
+// prueba cada una con el propio Node: la que logra construir una clave
+// válida es la buena.
 function normalizarClave(bruta: string) {
   let k = bruta.trim();
   if ((k.startsWith('"') && k.endsWith('"')) || (k.startsWith("'") && k.endsWith("'"))) {
     k = k.slice(1, -1);
   }
-  // Los \n pueden venir literales (un archivo .env) o ya como saltos reales
-  // (si el panel los interpretó): las dos formas terminan igual.
   k = k.replace(/\\n/g, "\n").trim();
 
-  // Y hay una tercera: algunos paneles guardan el valor en un solo renglón y
-  // se comen los saltos. El encabezado queda bien pero OpenSSL igual falla
-  // con "no start line", porque un PEM necesita las líneas cortadas. En ese
-  // caso se reconstruye a partir del contenido.
-  const cuerpo = k
-    .replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----/, "")
-    .replace(/-----END [A-Z ]*PRIVATE KEY-----/, "")
-    .replace(/\s+/g, "");
-
   const tipo = /BEGIN RSA PRIVATE KEY/.test(k) ? "RSA PRIVATE KEY" : "PRIVATE KEY";
-  const lineas = cuerpo.match(/.{1,64}/g) ?? [];
+  const crudo = k
+    .replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----/, "")
+    .replace(/-----END [A-Z ]*PRIVATE KEY-----/, "");
 
-  return `-----BEGIN ${tipo}-----\n${lineas.join("\n")}\n-----END ${tipo}-----\n`;
+  const candidatas = [
+    // 1. Tal cual vino, si ya era un PEM bien formado.
+    k,
+    // 2. Reconstruido sacando todo el espacio en blanco.
+    armarPem(crudo.replace(/\s+/g, ""), tipo),
+    // 3. Igual, pero devolviendo los "+" que el panel convirtió en espacios.
+    armarPem(crudo.replace(/[ \t]/g, "+").replace(/[\r\n]/g, ""), tipo),
+  ];
+
+  for (const c of candidatas) {
+    try {
+      createPrivateKey(c);
+      return c;
+    } catch {
+      // Se prueba la siguiente.
+    }
+  }
+
+  // Ninguna sirvió: se informa la forma sin exponer la clave.
+  const cuerpo = crudo.replace(/\s+/g, "");
+  console.error(
+    "[calendar] la clave privada no se pudo interpretar de ninguna forma. " +
+      `Largo original ${bruta.length}, cuerpo ${cuerpo.length} caracteres ` +
+      `(múltiplo de 4: ${cuerpo.length % 4 === 0}), ` +
+      `espacios ${(crudo.match(/[ \t]/g) ?? []).length}, ` +
+      `signos + ${(cuerpo.match(/\+/g) ?? []).length}, ` +
+      `barras ${(cuerpo.match(/\//g) ?? []).length}.`
+  );
+  return candidatas[1];
 }
 
 function getCalendarClient() {
