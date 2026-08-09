@@ -10,6 +10,7 @@ import {
   formatoLargo,
   hoyIso,
   ocurrenciasEn,
+  primerDiaHabil,
   nombreDelMes,
   semanaDe,
   sumarDias,
@@ -36,7 +37,10 @@ export default async function Agenda({ searchParams }: { searchParams: Params })
   const vista: Vista =
     p.vista === "semana" || p.vista === "mes" ? p.vista : "dia";
   const franja: Franja = p.franja === "tarde" ? "tarde" : "manana";
-  const fecha = p.fecha && /^\d{4}-\d{2}-\d{2}$/.test(p.fecha) ? p.fecha : hoyIso();
+  // Si no se pidió una fecha y hoy es domingo, se abre en el lunes: una
+  // agenda vacía parece que no hubiera turnos cargados.
+  const fecha =
+    p.fecha && /^\d{4}-\d{2}-\d{2}$/.test(p.fecha) ? p.fecha : primerDiaHabil(hoyIso());
 
   // Cada TO ve la suya; el admin elige cuál mirar.
   const { data: tos } = await supabase

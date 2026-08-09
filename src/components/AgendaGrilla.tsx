@@ -101,17 +101,25 @@ export function AgendaGrilla({
                     );
                   }
 
-                  const turno = inicio.get(`${fecha}|${hora}`) ?? null;
+                  const enCelda = inicio.get(`${fecha}|${hora}`) ?? [];
+                  const filas = enCelda.length
+                    ? Math.max(...enCelda.map((t) => filasQueOcupa(t.duracion_minutos)))
+                    : undefined;
                   return (
                     <td
                       key={fecha}
-                      rowSpan={turno ? filasQueOcupa(turno.duracion_minutos) : undefined}
+                      rowSpan={filas}
                       className={`border-l border-black/5 px-2 py-0.5 align-top ${
-                        turno ? "bg-green-light/25" : ""
-                      }`}
+                        enCelda.length ? "bg-green-light/25" : ""
+                      } ${enCelda.length > 1 ? "ring-1 ring-inset ring-orange" : ""}`}
                     >
-                      {turno && (
-                        <details className="group">
+                      {enCelda.length > 1 && (
+                        <p className="text-[10px] font-bold text-orange">
+                          {enCelda.length} turnos superpuestos
+                        </p>
+                      )}
+                      {enCelda.map((turno) => (
+                        <details key={turno.id} className="group">
                           <summary className="cursor-pointer list-none font-semibold text-green-dark">
                             {turno.paciente}
                             {turno.frecuencia !== "unica" && (
@@ -171,7 +179,7 @@ export function AgendaGrilla({
                             />
                           </div>
                         </details>
-                      )}
+                      ))}
                     </td>
                   );
                 })}

@@ -3,7 +3,7 @@ import { requireRole } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { BotonEnvio } from "@/components/ui/BotonEnvio";
 import { crearTurno } from "@/app/panel/to/turnos/actions";
-import { hoyIso } from "@/lib/agenda";
+import { hoyIso, ocurrenciasEn, sumarDias } from "@/lib/agenda";
 
 const CAMPO = "rounded-xl border border-black/10 px-4 py-3 outline-blue-mid";
 
@@ -16,36 +16,59 @@ export default async function TurnosDelPaciente({
   const { id } = await params;
   const supabase = await createClient();
 
-  const { data: turnos } = await supabase
+  const { data: turnosRaw } = await supabase
     .from("turnos")
-    .select("id, fecha, hora, tipo, modalidad, estado, link_online")
+    .select("id, fecha, hora, frecuencia, fecha_fin, duracion_minutos, modalidad, estado, link_online")
     .eq("paciente_id", id)
-    .order("fecha", { ascending: false })
-    .order("hora", { ascending: false });
+    .order("fecha", { ascending: false });
+
+  const { data: excepciones } = await supabase
+    .from("turnos_excepciones")
+    .select("turno_id, fecha")
+    .in("turno_id", (turnosRaw ?? []).map((t) => t.id));
 
   const hoy = hoyIso();
-  const proximos = (turnos ?? []).filter((t) => t.fecha >= hoy);
-  const pasados = (turnos ?? []).filter((t) => t.fecha < hoy);
   const soloLectura = usuario.rol === "direccion";
 
-  type Fila = {
-    id: string;
-    fecha: string;
-    hora: string;
-    tipo: string;
-    modalidad: string;
-    estado: string;
-    link_online: string | null;
-  };
+  // Un turno semanal es una sola fila que se repite: hay que calcular las
+  // fechas en que cae. Sin esto, una serie empezada hace meses aparecía como
+  // "turno anterior" aunque siga vigente, y no se veía ninguna próxima.
+  const series = (turnosRaw ?? []).map((t) => ({
+    id: t.id,
+    fecha: t.fecha,
+    hora: t.hora,
+    estado: t.estado,
+    modalidad: t.modalidad,
+    frecuencia: (t.frecuencia ?? "unica") as "unica" | "semanal",
+    fecha_fin: t.fecha_fin,
+    duracion_minutos: t.duracion_minutos ?? 45,
+    link_online: t.link_online,
+    paciente: "",
+    paciente_id: id,
+  }));
+
+  const desde = sumarDias(hoy, -120);
+  const hasta = sumarDias(hoy, 120);
+  const ocurrencias = ocurrenciasEn(series, desde, hasta, excepciones ?? []);
+
+  const porFecha = (a: { fechaOcurrencia: string; hora: string }, b: typeof a) =>
+    a.fechaOcurrencia === b.fechaOcurrencia
+      ? a.hora.localeCompare(b.hora)
+      : a.fechaOcurrencia.localeCompare(b.fechaOcurrencia);
+
+  const proximos = ocurrencias.filter((t) => t.fechaOcurrencia >= hoy).sort(porFecha);
+  const pasados = ocurrencias.filter((t) => t.fechaOcurrencia < hoy).sort((a, b) => porFecha(b, a));
+
+  type Fila = (typeof ocurrencias)[number] & { link_online?: string | null };
 
   const fila = (t: Fila) => (
     <div
-      key={t.id}
+      key={t.id + t.fechaOcurrencia}
       className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl bg-white px-4 py-3 text-sm shadow-sm"
     >
-      <span className="font-semibold text-green-dark">{t.fecha}</span>
+      <span className="font-semibold text-green-dark">{t.fechaOcurrencia}</span>
       <span className="tabular-nums">{t.hora.slice(0, 5)}</span>
-      <span className="text-foreground/60 capitalize">{t.tipo} · {t.modalidad}</span>
+      <span className="text-foreground/60">{t.duracion_minutos} min · <span className="capitalize">{t.modalidad}</span>{t.frecuencia === "semanal" ? " · semanal" : ""}</span>
       {t.link_online && (
         <a href={t.link_online} target="_blank" rel="noreferrer" className="text-xs font-bold text-blue-mid hover:underline">
           Link ↗

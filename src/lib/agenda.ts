@@ -251,18 +251,34 @@ export function filasQueOcupa(duracionMinutos: number) {
 // Índice de la grilla: para cada día, en qué fila empieza cada turno y qué
 // filas quedan tapadas por uno que ya empezó más arriba.
 export function mapaDeOcupacion(ocurrencias: Ocurrencia[], horarios: string[]) {
-  const inicio = new Map<string, Ocurrencia>();
+  // Varios turnos pueden caer en la misma casilla: si se superponen hay que
+  // verlos a los dos, porque justamente eso es lo que hay que corregir.
+  const inicio = new Map<string, Ocurrencia[]>();
   const tapada = new Set<string>();
 
   for (const t of ocurrencias) {
     const hora = aHHMM(t.hora);
     const desde = horarios.indexOf(hora);
     if (desde < 0) continue; // cae fuera de la franja que se está mirando
-    inicio.set(`${t.fechaOcurrencia}|${hora}`, t);
+
+    const clave = `${t.fechaOcurrencia}|${hora}`;
+    inicio.set(clave, [...(inicio.get(clave) ?? []), t]);
+
     const filas = filasQueOcupa(t.duracion_minutos);
     for (let i = 1; i < filas && desde + i < horarios.length; i++) {
       tapada.add(`${t.fechaOcurrencia}|${horarios[desde + i]}`);
     }
   }
+
+  // Una casilla que además arranca un turno no puede darse por tapada: si dos
+  // se pisan, el segundo debe seguir siendo visible.
+  for (const clave of inicio.keys()) tapada.delete(clave);
+
   return { inicio, tapada };
+}
+
+// Primer día hábil desde una fecha: los domingos no se atiende, y abrir la
+// agenda en un día vacío parece que no hubiera turnos cargados.
+export function primerDiaHabil(fechaIso: string) {
+  return diaDeSemana(fechaIso) === 0 ? sumarDias(fechaIso, 1) : fechaIso;
 }
