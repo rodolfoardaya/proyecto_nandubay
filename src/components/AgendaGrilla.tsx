@@ -11,7 +11,6 @@ import {
   formatoCorto,
   horariosDe,
   seAtiende,
-  filasQueOcupa,
   mapaDeOcupacion,
   type Bloqueo,
   type Franja,
@@ -83,9 +82,12 @@ export function AgendaGrilla({
                 </td>
 
                 {visibles.map((fecha) => {
-                  // Fila tapada por un turno que empezó más arriba.
-                  if (tapada.has(`${fecha}|${hora}`)) return null;
-
+                  // Todas las celdas se dibujan siempre. Antes se omitían las
+                  // tapadas por un rowspan, y bastaba un turno superpuesto
+                  // para que la fila quedara con una celda de más y todo lo
+                  // que seguía se corriera una columna: los turnos aparecían
+                  // en el día equivocado.
+                  const continuacion = tapada.has(`${fecha}|${hora}`);
                   const bloqueo = bloqueoEn(bloqueos, fecha, hora);
                   if (bloqueo) {
                     return (
@@ -102,15 +104,12 @@ export function AgendaGrilla({
                   }
 
                   const enCelda = inicio.get(`${fecha}|${hora}`) ?? [];
-                  const filas = enCelda.length
-                    ? Math.max(...enCelda.map((t) => filasQueOcupa(t.duracion_minutos)))
-                    : undefined;
+                  const ocupada = enCelda.length > 0 || continuacion;
                   return (
                     <td
                       key={fecha}
-                      rowSpan={filas}
                       className={`border-l border-black/5 px-2 py-0.5 align-top ${
-                        enCelda.length ? "bg-green-light/25" : ""
+                        ocupada ? "bg-green-light/25" : ""
                       } ${enCelda.length > 1 ? "ring-1 ring-inset ring-orange" : ""}`}
                     >
                       {enCelda.length > 1 && (
