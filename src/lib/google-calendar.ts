@@ -19,7 +19,21 @@ function normalizarClave(bruta: string) {
   }
   // Los \n pueden venir literales (un archivo .env) o ya como saltos reales
   // (si el panel los interpretó): las dos formas terminan igual.
-  return k.replace(/\\n/g, "\n").trim();
+  k = k.replace(/\\n/g, "\n").trim();
+
+  // Y hay una tercera: algunos paneles guardan el valor en un solo renglón y
+  // se comen los saltos. El encabezado queda bien pero OpenSSL igual falla
+  // con "no start line", porque un PEM necesita las líneas cortadas. En ese
+  // caso se reconstruye a partir del contenido.
+  const cuerpo = k
+    .replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----/, "")
+    .replace(/-----END [A-Z ]*PRIVATE KEY-----/, "")
+    .replace(/\s+/g, "");
+
+  const tipo = /BEGIN RSA PRIVATE KEY/.test(k) ? "RSA PRIVATE KEY" : "PRIVATE KEY";
+  const lineas = cuerpo.match(/.{1,64}/g) ?? [];
+
+  return `-----BEGIN ${tipo}-----\n${lineas.join("\n")}\n-----END ${tipo}-----\n`;
 }
 
 function getCalendarClient() {
