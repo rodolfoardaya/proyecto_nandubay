@@ -2,10 +2,16 @@ import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { enviarRecordatorioWhatsApp } from "@/lib/whatsapp";
 
-// Pensado para ejecutarse una vez por hora vía un scheduler externo
-// (Vercel Cron u otro), protegido con CRON_SECRET. Busca turnos que caen
-// dentro de las próximas 24-25hs, confirmados, sin recordatorio enviado
-// todavía, y les manda un WhatsApp al familiar del paciente.
+// Busca turnos que caen dentro de las próximas 24-25hs, confirmados, sin
+// recordatorio enviado todavía, y les manda un WhatsApp al familiar del
+// paciente. Protegido con CRON_SECRET.
+//
+// La ventana es de una hora, así que esto tiene que correr una vez por hora
+// o los turnos de las horas salteadas se quedan sin aviso. No hay scheduler
+// dentro de la app: se da de alta en el panel de Hostinger, en Cron Jobs,
+// con schedule "0 * * * *" y el comando:
+//
+//   curl -s "https://DOMINIO/api/cron/recordatorios?secret=EL_CRON_SECRET"
 export async function GET(request: NextRequest) {
   const secret = request.nextUrl.searchParams.get("secret");
   if (!process.env.CRON_SECRET || secret !== process.env.CRON_SECRET) {

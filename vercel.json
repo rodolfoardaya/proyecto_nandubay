@@ -1,8 +1,0 @@
-{
-  "crons": [
-    {
-      "path": "/api/cron/recordatorios?secret=REEMPLAZAR_CON_CRON_SECRET",
-      "schedule": "0 * * * *"
-    }
-  ]
-}
