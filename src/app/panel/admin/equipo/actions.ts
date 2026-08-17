@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { requireRole } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import { registrarAuditoria } from "@/lib/auditoria";
 
 // Sin caracteres que se confundan al dictarla o anotarla (O/0, I/1, l).
 function generarClaveProvisoria(): string {
@@ -99,6 +100,71 @@ export async function cambiarEstadoTo(formData: FormData) {
 
   const { error } = await supabase.from("tos").update({ activo }).eq("id", to_id);
   if (error) throw new Error(error.message);
+
+  revalidatePath("/panel/admin/equipo");
+}
+
+// Borrado real de una TO, para sacar del sistema una cargada por error o de
+// prueba. Distinto de la baja: la baja la deja archivada y se puede revertir.
+//
+// Solo se permite si no quedó nada colgando de ella. Una TO con pacientes,
+// turnos, evolución o facturas no se borra: esa información es historia
+// clínica y tiene que conservarse (Ley 26.529). La base ya lo impide por
+// clave foránea; acá se comprueba antes para poder decir qué es lo que lo
+// impide, en vez de mostrar el error crudo de Postgres.
+export async function borrarTo(formData: FormData) {
+  await requireRole("admin");
+
+  const to_id = String(formData.get("to_id"));
+  const admin = createAdminClient();
+
+  const { data: to } = await admin
+    .from("tos")
+    .select("id, nombre, usuario_id")
+    .eq("id", to_id)
+    .maybeSingle();
+
+  if (!to) throw new Error("Esa TO ya no existe.");
+
+  // El conteo va con el cliente de servicio a propósito: si RLS escondiera
+  // una fila, el control diría que no hay nada y el borrado se llevaría
+  // puesta información que sí existe.
+  const tablas = [
+    { tabla: "pacientes", columna: "to_asignada_id", etiqueta: "pacientes" },
+    { tabla: "turnos", columna: "to_id", etiqueta: "turnos" },
+    { tabla: "notas_evolucion", columna: "to_id", etiqueta: "notas de evolución" },
+    { tabla: "facturas", columna: "to_id", etiqueta: "facturas" },
+  ];
+
+  const atados: string[] = [];
+  for (const { tabla, columna, etiqueta } of tablas) {
+    const { count } = await admin
+      .from(tabla)
+      .select("id", { count: "exact", head: true })
+      .eq(columna, to_id);
+    if (count) atados.push(`${count} ${etiqueta}`);
+  }
+
+  if (atados.length > 0) {
+    throw new Error(
+      `No se puede borrar a ${to.nombre}: tiene ${atados.join(", ")} a su nombre. ` +
+        "Esa información es historia clínica y no se elimina. Usá \"Dar de baja\", " +
+        "que la saca de las listas sin perder nada."
+    );
+  }
+
+  const supabase = await createClient();
+  const { error } = await supabase.from("tos").delete().eq("id", to_id);
+  if (error) throw new Error(error.message);
+
+  // La cuenta de acceso se borra después de la fila: al borrar el usuario de
+  // auth, la fila de `usuarios` cae por cascada, y con ella habría caído
+  // también la de `tos` sin dejar registro de por qué.
+  if (to.usuario_id) {
+    await admin.auth.admin.deleteUser(to.usuario_id);
+  }
+
+  await registrarAuditoria("baja_to", `${to.nombre} — borrada del sistema`);
 
   revalidatePath("/panel/admin/equipo");
 }

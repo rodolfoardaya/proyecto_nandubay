@@ -20,7 +20,10 @@ export default async function Reportes() {
           </a>
         </Card>
         <Card>
-          <p className="font-bold text-green-dark">Próximos 7 días</p>
+          <p className="font-bold text-green-dark">Turnos de la semana</p>
+          <p className="mt-1 text-xs text-foreground/60">
+            De lunes a sábado, la semana en curso.
+          </p>
           <a
             href="/api/reporte-turnos?rango=semana"
             className="mt-3 inline-block rounded-full bg-green-mid px-5 py-2 font-bold text-white hover:bg-green-dark"

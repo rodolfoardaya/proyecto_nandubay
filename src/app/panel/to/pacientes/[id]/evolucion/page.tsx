@@ -39,13 +39,16 @@ export default async function EvolucionDelPaciente({
             {notas.length} {notas.length === 1 ? "nota" : "notas"}
           </span>
         </h2>
+        {/* Imprime datos personales + evolución, nada más. La historia
+            completa —con ficha de inicio y acuerdo— sigue estando en la
+            portada del paciente. */}
         <a
-          href={`/api/backup?paciente_id=${id}`}
+          href={`/api/imprimir/evolucion?paciente_id=${id}`}
           target="_blank"
           rel="noreferrer"
           className="text-sm font-bold text-blue-mid hover:underline"
         >
-          Imprimir historia ↗
+          Imprimir evolución ↗
         </a>
       </div>
 

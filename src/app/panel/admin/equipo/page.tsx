@@ -3,7 +3,8 @@ import { createClient } from "@/lib/supabase/server";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { ResetearClaveButton } from "@/components/ResetearClaveButton";
-import { crearTo, actualizarTo, cambiarEstadoTo, subirFotoTo } from "./actions";
+import { BotonConfirmar } from "@/components/ui/BotonConfirmar";
+import { crearTo, actualizarTo, cambiarEstadoTo, borrarTo, subirFotoTo } from "./actions";
 
 function iniciales(nombre: string) {
   return nombre
@@ -190,16 +191,31 @@ export default async function EquipoTo({
               </form>
             </details>
 
-            <form action={cambiarEstadoTo} className="mt-2">
-              <input type="hidden" name="to_id" value={t.id} />
-              <input type="hidden" name="activo" value={(!t.activo).toString()} />
-              <button
-                type="submit"
-                className={`text-xs font-semibold hover:underline ${t.activo ? "text-orange" : "text-green-mid"}`}
-              >
-                {t.activo ? "Dar de baja" : "Reactivar"}
-              </button>
-            </form>
+            <div className="mt-2 flex flex-wrap items-center gap-4">
+              <form action={cambiarEstadoTo}>
+                <input type="hidden" name="to_id" value={t.id} />
+                <input type="hidden" name="activo" value={(!t.activo).toString()} />
+                <button
+                  type="submit"
+                  className={`text-xs font-semibold hover:underline ${t.activo ? "text-orange" : "text-green-mid"}`}
+                >
+                  {t.activo ? "Dar de baja" : "Reactivar"}
+                </button>
+              </form>
+
+              {/* Borrado real, para las cargadas por error o de prueba. Si la
+                  TO tiene pacientes, turnos, evolución o facturas, la acción
+                  se niega y explica por qué: eso es historia clínica. */}
+              <form action={borrarTo}>
+                <input type="hidden" name="to_id" value={t.id} />
+                <BotonConfirmar
+                  confirmacion={`¿Borrar a ${t.nombre} del sistema? No se puede deshacer. Si tiene pacientes o turnos cargados, no se va a borrar.`}
+                  className="text-xs font-semibold text-red-700 hover:underline"
+                >
+                  Borrar del sistema
+                </BotonConfirmar>
+              </form>
+            </div>
           </Card>
         ))}
         {!tos?.length && (

@@ -5,6 +5,14 @@ import { createClient } from "@/lib/supabase/server";
 import { registrarAuditoria } from "@/lib/auditoria";
 import { metaImpresion } from "@/lib/pdf/comunes";
 import { ReporteTurnosDoc, type TurnoReporte } from "@/lib/pdf/ReporteTurnosDoc";
+import {
+  aHHMM,
+  formatoCorto,
+  hoyIso,
+  ocurrenciasEn,
+  semanaDe,
+  type Turno,
+} from "@/lib/agenda";
 
 export async function GET(request: NextRequest) {
   const usuario = await getUsuarioActual();
@@ -13,35 +21,82 @@ export async function GET(request: NextRequest) {
   }
 
   const rango = request.nextUrl.searchParams.get("rango") === "semana" ? "semana" : "dia";
-  const hoy = new Date().toISOString().slice(0, 10);
-  const hasta =
-    rango === "semana"
-      ? new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10)
-      : hoy;
+
+  // La semana es la del calendario, de lunes a sábado, igual que la agenda:
+  // pedir "la semana" y recibir los próximos siete días corridos hacía que el
+  // reporte del lunes terminara el lunes siguiente y no cerrara ninguna semana.
+  const hoy = hoyIso();
+  const fechas = rango === "semana" ? semanaDe(hoy) : [hoy];
+  const desde = fechas[0];
+  const hasta = fechas[fechas.length - 1];
 
   const supabase = await createClient();
 
   // RLS ya restringe: TO ve sus turnos, Admin ve todos.
-  const { data: turnos } = await supabase
+  //
+  // Las repeticiones de un turno semanal no son filas: la tabla guarda la
+  // definición de la serie y las fechas se calculan. Por eso se traen todas
+  // las series que empezaron antes del corte —no sólo las que arrancan dentro
+  // del rango— y recién después se las expande. Filtrar por `fecha` acá era
+  // lo que dejaba afuera a todo paciente semanal cargado en otra semana.
+  const { data: turnosRaw } = await supabase
     .from("turnos")
-    .select("fecha, hora, modalidad, estado, pacientes(nombre), tos(nombre)")
-    .gte("fecha", hoy)
-    .lte("fecha", hasta)
-    .order("fecha")
-    .order("hora");
+    .select(
+      "id, fecha, hora, estado, modalidad, frecuencia, fecha_fin, duracion_minutos, paciente_id, pacientes(nombre), tos(nombre)"
+    )
+    .lte("fecha", hasta);
 
-  const datos: TurnoReporte[] = (turnos ?? []).map((t) => ({
+  const series: Turno[] = (turnosRaw ?? []).map((t) => ({
+    id: t.id,
     fecha: t.fecha,
     hora: t.hora,
-    /* @ts-expect-error relación anidada */
-    pacienteNombre: t.pacientes?.nombre ?? "",
-    /* @ts-expect-error relación anidada */
-    toNombre: t.tos?.nombre ?? "",
+    estado: t.estado,
+    modalidad: t.modalidad,
+    frecuencia: (t.frecuencia ?? "unica") as Turno["frecuencia"],
+    fecha_fin: t.fecha_fin,
+    duracion_minutos: t.duracion_minutos ?? 45,
+    paciente_id: t.paciente_id,
+    // @ts-expect-error relación anidada
+    paciente: t.pacientes?.nombre ?? "",
+  }));
+
+  // El nombre de la TO no viaja en la serie, pero se necesita en el listado.
+  const toPorTurno = new Map(
+    (turnosRaw ?? []).map((t) => [
+      t.id,
+      // @ts-expect-error relación anidada
+      (t.tos?.nombre as string | undefined) ?? "",
+    ])
+  );
+
+  // Las fechas canceladas puntualmente no son turnos: se saltean.
+  const { data: excepciones } = await supabase
+    .from("turnos_excepciones")
+    .select("turno_id, fecha")
+    .gte("fecha", desde)
+    .lte("fecha", hasta);
+
+  const ocurrencias = ocurrenciasEn(series, desde, hasta, excepciones ?? []).sort(
+    (a, b) =>
+      a.fechaOcurrencia.localeCompare(b.fechaOcurrencia) || a.hora.localeCompare(b.hora)
+  );
+
+  const datos: TurnoReporte[] = ocurrencias.map((t) => ({
+    fecha: t.fechaOcurrencia,
+    hora: aHHMM(t.hora),
+    pacienteNombre: t.paciente,
+    toNombre: toPorTurno.get(t.id) ?? "",
     modalidad: t.modalidad,
     estado: t.estado,
   }));
 
-  const titulo = rango === "semana" ? "Reporte de turnos — semana" : "Reporte de turnos — hoy";
+  // El título dice el rango cubierto: sin eso no hay forma de saber, mirando
+  // el papel, qué días entraron en el reporte.
+  const titulo =
+    rango === "semana"
+      ? `Reporte de turnos — semana del ${formatoCorto(desde)} al ${formatoCorto(hasta)}`
+      : `Reporte de turnos — ${formatoCorto(hoy)}`;
+
   await registrarAuditoria("exportacion", `Reporte de turnos (${rango}) — ${datos.length} turnos`);
   const buffer = await renderToBuffer(
     <ReporteTurnosDoc titulo={titulo} turnos={datos} meta={metaImpresion(usuario.nombre)} />
