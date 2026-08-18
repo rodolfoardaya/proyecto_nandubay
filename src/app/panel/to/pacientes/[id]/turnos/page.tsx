@@ -92,9 +92,14 @@ export default async function TurnosDelPaciente({
     <div className="max-w-3xl">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="font-bold text-green-dark">Agenda de turnos del paciente</h2>
-        <Link href={`/panel/${usuario.rol}/agenda`} className="text-sm font-bold text-blue-mid hover:underline">
-          Ver la agenda completa →
-        </Link>
+        {/* Dirección no tiene pantalla de agenda propia: su rol es de
+            consulta de la historia clínica. Mostrarle el enlace la mandaba a
+            un 404. */}
+        {usuario.rol !== "direccion" && (
+          <Link href={`/panel/${usuario.rol}/agenda`} className="text-sm font-bold text-blue-mid hover:underline">
+            Ver la agenda completa →
+          </Link>
+        )}
       </div>
 
       {!soloLectura && (

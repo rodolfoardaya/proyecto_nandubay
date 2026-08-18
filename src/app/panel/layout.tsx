@@ -6,6 +6,10 @@ import { signOut } from "@/app/login/actions";
 import { VERSION } from "@/lib/version";
 import { CierrePorInactividad } from "@/components/CierrePorInactividad";
 
+// Cada entrada tiene que corresponder a una pantalla que exista. Había dos
+// "Biblioteca" —una para TO y otra para admin— apuntando a rutas que nunca se
+// construyeron: la tabla biblioteca_interna está en la base desde la primera
+// migración, pero la pantalla no. Daban 404 desde siempre.
 const NAV: Record<string, { href: string; label: string }[]> = {
   to: [
     { href: "/panel/to", label: "Inicio" },
@@ -13,7 +17,6 @@ const NAV: Record<string, { href: string; label: string }[]> = {
     { href: "/panel/to/pacientes", label: "Pacientes" },
     { href: "/panel/to/facturacion", label: "Facturación" },
     { href: "/panel/to/backups", label: "Backups" },
-    { href: "/panel/to/biblioteca", label: "Biblioteca" },
     { href: "/panel/to/reportes", label: "Reportes" },
   ],
   admin: [
@@ -23,7 +26,6 @@ const NAV: Record<string, { href: string; label: string }[]> = {
     { href: "/panel/admin/facturacion", label: "Facturación" },
     { href: "/panel/admin/backups", label: "Backups" },
     { href: "/panel/admin/backup-disco", label: "Backup del sistema en disco" },
-    { href: "/panel/admin/biblioteca", label: "Biblioteca" },
     { href: "/panel/admin/reportes", label: "Reportes" },
     { href: "/panel/admin/equipo", label: "Equipo TO" },
     { href: "/panel/admin/auditoria", label: "Auditoría" },
