@@ -104,6 +104,67 @@ export async function cambiarEstadoTo(formData: FormData) {
   revalidatePath("/panel/admin/equipo");
 }
 
+// Pasa todo lo que está a nombre de una TO a otra: pacientes, turnos, notas
+// de evolución y facturas. Es el paso previo a borrar una TO duplicada o que
+// deja el consultorio — sin esto, lo único posible es la baja lógica, porque
+// borrar una TO con historia clínica detrás está bloqueado a propósito.
+//
+// El número de registro de los pacientes NO cambia: se generó con la letra de
+// la TO que los dio de alta y es el identificador de su historia clínica. Un
+// paciente reasignado conserva el suyo, como en cualquier archivo en papel.
+export async function reasignarPacientes(formData: FormData) {
+  await requireRole("admin");
+  const supabase = await createClient();
+
+  const origen_to_id = String(formData.get("origen_to_id"));
+  const destino_to_id = String(formData.get("destino_to_id") || "");
+
+  if (!destino_to_id) throw new Error("Elegí a qué TO pasan los pacientes.");
+  if (origen_to_id === destino_to_id) {
+    throw new Error("La TO que entrega y la que recibe son la misma.");
+  }
+
+  const { data: tos } = await supabase
+    .from("tos")
+    .select("id, nombre")
+    .in("id", [origen_to_id, destino_to_id]);
+
+  const nombre = (id: string) => (tos ?? []).find((t) => t.id === id)?.nombre ?? id;
+
+  if ((tos ?? []).length !== 2) {
+    throw new Error("Alguna de las dos TO ya no existe.");
+  }
+
+  const movimientos = [
+    { tabla: "pacientes", columna: "to_asignada_id", etiqueta: "pacientes" },
+    { tabla: "turnos", columna: "to_id", etiqueta: "turnos" },
+    { tabla: "notas_evolucion", columna: "to_id", etiqueta: "notas de evolución" },
+    { tabla: "facturas", columna: "to_id", etiqueta: "facturas" },
+  ];
+
+  const movidos: string[] = [];
+  for (const m of movimientos) {
+    const { data, error } = await supabase
+      .from(m.tabla)
+      .update({ [m.columna]: destino_to_id })
+      .eq(m.columna, origen_to_id)
+      .select("id");
+
+    if (error) throw new Error(`No se pudieron mover los ${m.etiqueta}: ${error.message}`);
+    if (data?.length) movidos.push(`${data.length} ${m.etiqueta}`);
+  }
+
+  // Los bloqueos de agenda no se mueven: son las horas que esa persona se
+  // reservaba, no información del paciente. Se van con ella al borrarla.
+  await registrarAuditoria(
+    "reasignacion_to",
+    `${nombre(origen_to_id)} → ${nombre(destino_to_id)}: ${movidos.join(", ") || "no había nada que mover"}`
+  );
+
+  revalidatePath("/panel/admin/equipo");
+  revalidatePath("/panel/admin/pacientes");
+}
+
 // Borrado real de una TO, para sacar del sistema una cargada por error o de
 // prueba. Distinto de la baja: la baja la deja archivada y se puede revertir.
 //

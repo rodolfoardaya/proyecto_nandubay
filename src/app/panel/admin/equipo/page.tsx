@@ -4,7 +4,7 @@ import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { ResetearClaveButton } from "@/components/ResetearClaveButton";
 import { BotonConfirmar } from "@/components/ui/BotonConfirmar";
-import { crearTo, actualizarTo, cambiarEstadoTo, borrarTo, subirFotoTo } from "./actions";
+import { crearTo, actualizarTo, cambiarEstadoTo, borrarTo, reasignarPacientes, subirFotoTo } from "./actions";
 
 function iniciales(nombre: string) {
   return nombre
@@ -190,6 +190,46 @@ export default async function EquipoTo({
                 </Button>
               </form>
             </details>
+
+            {/* Reasignar: el paso previo obligado para poder borrar una TO
+                duplicada o que deja el consultorio. Mientras tenga pacientes
+                o turnos a su nombre, el borrado se niega. */}
+            {tosConFoto.length > 1 && (
+              <details className="mt-2">
+                <summary className="cursor-pointer text-xs font-semibold text-blue-mid">
+                  Pasar sus pacientes a otra TO
+                </summary>
+                <form action={reasignarPacientes} className="mt-2 grid gap-2">
+                  <input type="hidden" name="origen_to_id" value={t.id} />
+                  <select
+                    name="destino_to_id"
+                    defaultValue=""
+                    className="rounded-xl border border-black/10 px-3 py-2 text-sm outline-blue-mid"
+                  >
+                    <option value="">Elegí la TO que los recibe...</option>
+                    {tosConFoto
+                      .filter((otra) => otra.id !== t.id)
+                      .map((otra) => (
+                        <option key={otra.id} value={otra.id}>
+                          {otra.nombre}
+                        </option>
+                      ))}
+                  </select>
+                  <p className="text-xs text-foreground/60">
+                    Se mueven sus pacientes, turnos, notas de evolución y
+                    facturas. El Nº de registro de cada paciente no cambia:
+                    identifica su historia clínica.
+                  </p>
+                  <BotonConfirmar
+                    confirmacion={`¿Pasar todos los pacientes y turnos de ${t.nombre} a la TO elegida?`}
+                    enCurso="Moviendo..."
+                    className="justify-self-start text-xs font-semibold text-blue-mid hover:underline"
+                  >
+                    Mover todo
+                  </BotonConfirmar>
+                </form>
+              </details>
+            )}
 
             <div className="mt-2 flex flex-wrap items-center gap-4">
               <form action={cambiarEstadoTo}>

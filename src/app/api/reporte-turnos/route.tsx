@@ -21,6 +21,9 @@ export async function GET(request: NextRequest) {
   }
 
   const rango = request.nextUrl.searchParams.get("rango") === "semana" ? "semana" : "dia";
+  // El admin ve las agendas de todas las TO juntas, y así el PDF no se puede
+  // contrastar contra la agenda de ninguna. Con `to` se limita a una sola.
+  const toPedida = request.nextUrl.searchParams.get("to") || "";
 
   // La semana es la del calendario, de lunes a sábado, igual que la agenda:
   // pedir "la semana" y recibir los próximos siete días corridos hacía que el
@@ -39,12 +42,16 @@ export async function GET(request: NextRequest) {
   // las series que empezaron antes del corte —no sólo las que arrancan dentro
   // del rango— y recién después se las expande. Filtrar por `fecha` acá era
   // lo que dejaba afuera a todo paciente semanal cargado en otra semana.
-  const { data: turnosRaw } = await supabase
+  let consulta = supabase
     .from("turnos")
     .select(
       "id, fecha, hora, estado, modalidad, frecuencia, fecha_fin, duracion_minutos, paciente_id, pacientes(nombre), tos(nombre)"
     )
     .lte("fecha", hasta);
+
+  if (toPedida) consulta = consulta.eq("to_id", toPedida);
+
+  const { data: turnosRaw } = await consulta;
 
   const series: Turno[] = (turnosRaw ?? []).map((t) => ({
     id: t.id,
@@ -92,10 +99,13 @@ export async function GET(request: NextRequest) {
 
   // El título dice el rango cubierto: sin eso no hay forma de saber, mirando
   // el papel, qué días entraron en el reporte.
+  // Si se filtró por una TO, su nombre va en el título: una hoja impresa sin
+  // eso no dice de quién es la agenda.
+  const toNombre = toPedida ? (datos[0]?.toNombre ?? "") : "";
   const titulo =
-    rango === "semana"
+    (rango === "semana"
       ? `Reporte de turnos — semana del ${formatoCorto(desde)} al ${formatoCorto(hasta)}`
-      : `Reporte de turnos — ${formatoCorto(hoy)}`;
+      : `Reporte de turnos — ${formatoCorto(hoy)}`) + (toNombre ? ` — ${toNombre}` : "");
 
   await registrarAuditoria("exportacion", `Reporte de turnos (${rango}) — ${datos.length} turnos`);
   const buffer = await renderToBuffer(
