@@ -101,6 +101,8 @@ export async function cancelarUnaFecha(formData: FormData) {
 
   await registrarAuditoria("cancelacion_turno_fecha", `turno ${turno_id} — ${fecha}`);
   revalidatePath(`/panel/${usuario.rol}/agenda`);
+  // La pantalla de inicio también lista los turnos de la semana.
+  revalidatePath(`/panel/${usuario.rol}`);
 }
 
 // Cancelar la serie completa: el turno pasa a 'cancelado' y deja de expandirse
