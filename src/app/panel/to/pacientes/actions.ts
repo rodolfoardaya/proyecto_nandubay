@@ -238,34 +238,46 @@ export async function crearPaciente(formData: FormData) {
   redirect(`/panel/${usuario.rol}/pacientes/${paciente.id}`);
 }
 
-// El CUIL lo carga y lo corrige también la TO, no sólo el admin: es el dato
-// que le piden a la familia en la primera sesión y el que hace falta para
-// facturar, así que esperar a que lo cargue otro traba el trabajo del día.
+// El CUIL y la obra social los carga y los corrige también la TO, no sólo el
+// admin: son los datos que le pide a la familia en la primera sesión y los que
+// hacen falta para facturar. Esperar a que los cargue otro traba el trabajo
+// del día, y la obra social además cambia seguido — la TO es la que se entera.
 //
 // El resto de los datos personales —nombre, fecha de nacimiento, tipo de
 // ficha— sigue siendo del admin: esos identifican la historia clínica.
 //
 // Qué paciente puede tocar cada TO no lo decide esta función: lo decide la
 // policy `pacientes_write`, que en la base misma limita a cada TO a los suyos.
-export async function actualizarCuilPaciente(formData: FormData) {
+export async function actualizarDatosAdministrativos(formData: FormData) {
   const usuario = await requireRole("to", "admin");
   const supabase = await createClient();
 
   const paciente_id = String(formData.get("paciente_id"));
   const cuilCrudo = String(formData.get("cuil") || "").trim();
 
-  if (!cuilCrudo) throw new Error("Escribí el CUIL antes de guardar.");
+  // La obra social se escribe siempre: dejarla vacía es la forma de borrarla
+  // cuando una familia deja de tenerla.
+  const cambios: Record<string, string | null> = {
+    obra_social: String(formData.get("obra_social") || "").trim() || null,
+  };
 
-  const cuil = normalizarCuil(cuilCrudo);
-  if (!cuil) {
-    throw new Error("El CUIL tiene que tener 11 dígitos, con el formato XX-XXXXXXXX-X.");
+  // El CUIL, en cambio, sólo se toca si escribieron uno. Vacío significa "no
+  // lo cambio", no "borralo": si no, guardar la obra social de un paciente que
+  // ya tiene CUIL se lo llevaría puesto.
+  if (cuilCrudo) {
+    const cuil = normalizarCuil(cuilCrudo);
+    if (!cuil) {
+      throw new Error("El CUIL tiene que tener 11 dígitos, con el formato XX-XXXXXXXX-X.");
+    }
+    cambios.cuil = cuil;
+    // El DNI se mantiene sincronizado con el CUIL: de él dependen la búsqueda
+    // y el índice que impide cargar dos veces al mismo paciente.
+    cambios.dni = dniDeCuil(cuil);
   }
 
-  // El DNI se mantiene sincronizado con el CUIL: de él dependen la búsqueda y
-  // el índice que impide cargar dos veces al mismo paciente.
   const { error } = await supabase
     .from("pacientes")
-    .update({ cuil, dni: dniDeCuil(cuil) })
+    .update(cambios)
     .eq("id", paciente_id);
 
   if (error) {

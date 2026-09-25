@@ -7,7 +7,7 @@ import { calcularDatosFaltantes } from "@/lib/datos-faltantes";
 import { SECCIONES_PACIENTE } from "@/lib/paciente-vista";
 import { BotonEnvio } from "@/components/ui/BotonEnvio";
 import { actualizarDatosPaciente } from "@/app/panel/admin/pacientes/actions";
-import { actualizarCuilPaciente } from "@/app/panel/to/pacientes/actions";
+import { actualizarDatosAdministrativos } from "@/app/panel/to/pacientes/actions";
 import { documentoVisible, edadDe } from "@/lib/paciente-datos";
 
 // Portada del paciente: sus datos y el acceso a cada parte de la historia.
@@ -153,20 +153,19 @@ export default async function PortadaPaciente({
           </details>
         )}
 
-        {/* La TO carga y corrige el CUIL de sus pacientes: es lo que pide en la
-            primera sesión y lo que hace falta para facturar. El resto de los
-            datos personales sigue siendo del admin. */}
+        {/* La TO carga y corrige el CUIL y la obra social de sus pacientes: son
+            los datos que pide en la primera sesión y los que hacen falta para
+            facturar. El resto sigue siendo del admin. */}
         {usuario.rol === "to" && (
           <details className="mt-4">
             <summary className="cursor-pointer text-xs font-semibold text-blue-mid">
-              {paciente.cuil ? "Corregir el CUIL" : "Cargar el CUIL"}
+              Cargar o corregir CUIL y obra social
             </summary>
-            <form action={actualizarCuilPaciente} className="mt-3 grid max-w-sm gap-2">
+            <form action={actualizarDatosAdministrativos} className="mt-3 grid max-w-sm gap-2">
               <input type="hidden" name="paciente_id" value={id} />
               <label className="text-xs font-semibold text-foreground/70">
                 CUIL
                 <input
-                  required
                   name="cuil"
                   defaultValue={paciente.cuil ?? ""}
                   placeholder="XX-XXXXXXXX-X"
@@ -179,11 +178,22 @@ export default async function PortadaPaciente({
                   </span>
                 )}
               </label>
+              <label className="text-xs font-semibold text-foreground/70">
+                Obra social
+                <input
+                  name="obra_social"
+                  defaultValue={paciente.obra_social ?? ""}
+                  placeholder="Obra social o prepaga"
+                  className="mt-1 w-full rounded-xl border border-black/10 px-3 py-2 text-sm outline-blue-mid"
+                />
+              </label>
               <p className="text-xs text-foreground/60">
-                Los otros datos personales los corrige la administración.
+                Dejá la obra social vacía si la familia no tiene. El nombre, la
+                fecha de nacimiento y el tipo de ficha los corrige la
+                administración.
               </p>
               <BotonEnvio variant="secondary" className="justify-self-start">
-                Guardar CUIL
+                Guardar
               </BotonEnvio>
             </form>
           </details>
