@@ -7,6 +7,7 @@ import { calcularDatosFaltantes } from "@/lib/datos-faltantes";
 import { SECCIONES_PACIENTE } from "@/lib/paciente-vista";
 import { BotonEnvio } from "@/components/ui/BotonEnvio";
 import { actualizarDatosPaciente } from "@/app/panel/admin/pacientes/actions";
+import { documentoVisible, edadDe } from "@/lib/paciente-datos";
 
 // Portada del paciente: sus datos y el acceso a cada parte de la historia.
 export default async function PortadaPaciente({
@@ -20,7 +21,7 @@ export default async function PortadaPaciente({
 
   const { data: paciente } = await supabase
     .from("pacientes")
-    .select("id, nombre, numero_registro, tipo, fecha_nacimiento, dni, tos(nombre)")
+    .select("id, nombre, numero_registro, tipo, fecha_nacimiento, dni, cuil, obra_social, tos(nombre)")
     .eq("id", id)
     .maybeSingle();
 
@@ -42,6 +43,10 @@ export default async function PortadaPaciente({
     ultimaEvolucion: evolucion?.[0]?.fecha ?? null,
   });
 
+  // La edad no se carga: sale de la fecha de nacimiento y del día de hoy, y
+  // por eso no aparece hasta que la fecha esté cargada.
+  const edad = edadDe(paciente.fecha_nacimiento);
+
   const base = `/panel/${usuario.rol}/pacientes/${id}`;
   const dato = (etiqueta: string, valor: string | null | undefined) =>
     valor ? (
@@ -58,8 +63,10 @@ export default async function PortadaPaciente({
         <dl className="mt-3 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {dato("Apellido y nombre", paciente.nombre)}
           {dato("Nº de registro", paciente.numero_registro)}
-          {dato("DNI", paciente.dni)}
+          {dato("CUIL", documentoVisible(paciente.cuil, paciente.dni))}
           {dato("Fecha de nacimiento", paciente.fecha_nacimiento)}
+          {dato("Edad", edad?.texto)}
+          {dato("Obra social", paciente.obra_social)}
           {dato("Tipo de ficha", paciente.tipo)}
           {/* @ts-expect-error relación anidada */}
           {dato("TO a cargo", paciente.tos?.nombre)}
@@ -85,11 +92,29 @@ export default async function PortadaPaciente({
                 />
               </label>
               <label className="text-xs font-semibold text-foreground/70">
-                DNI
+                CUIL
                 <input
-                  name="dni"
-                  defaultValue={paciente.dni ?? ""}
+                  name="cuil"
+                  defaultValue={paciente.cuil ?? ""}
+                  placeholder="XX-XXXXXXXX-X"
                   inputMode="numeric"
+                  className="mt-1 w-full rounded-xl border border-black/10 px-3 py-2 text-sm outline-blue-mid"
+                />
+                {/* Los cargados antes de que existiera el campo tienen el DNI
+                    suelto: se muestra para poder completar el CUIL sin ir a
+                    buscar el documento. */}
+                {!paciente.cuil && paciente.dni && (
+                  <span className="mt-1 block font-normal text-foreground/60">
+                    DNI cargado: {paciente.dni}
+                  </span>
+                )}
+              </label>
+              <label className="text-xs font-semibold text-foreground/70">
+                Obra social
+                <input
+                  name="obra_social"
+                  defaultValue={paciente.obra_social ?? ""}
+                  placeholder="Obra social o prepaga"
                   className="mt-1 w-full rounded-xl border border-black/10 px-3 py-2 text-sm outline-blue-mid"
                 />
               </label>
@@ -115,8 +140,10 @@ export default async function PortadaPaciente({
               </label>
               <p className="text-xs text-foreground/60 sm:col-span-2">
                 El Nº de registro no se modifica: identifica la historia
-                clínica. Cambiar el tipo de ficha cambia qué campos se muestran
-                en la ficha de inicio; lo ya cargado no se borra.
+                clínica. La edad tampoco se carga, se calcula sola a partir de
+                la fecha de nacimiento. Cambiar el tipo de ficha cambia qué
+                campos se muestran en la ficha de inicio; lo ya cargado no se
+                borra.
               </p>
               <BotonEnvio variant="secondary" className="justify-self-start sm:col-span-2">
                 Guardar datos personales

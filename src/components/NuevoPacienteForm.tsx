@@ -24,10 +24,14 @@ export function NuevoPacienteForm({ tipo, secciones }: Props) {
   // El apellido y el nombre se cargan por separado, como en la planilla en
   // papel, pero se guardan juntos en `pacientes.nombre` (que es lo que ven
   // los listados, ordenados por apellido).
+  // `dniLeido` no se tipea: es el DNI que pudo haber traído la planilla. Se
+  // conserva para no perderlo si todavía no se sabe el CUIL completo.
   const [paciente, setPaciente] = useState({
     apellido: "",
     nombre: "",
-    dni: "",
+    cuil: "",
+    dniLeido: "",
+    obra_social: "",
     fecha_nacimiento: "",
   });
   const nombreCompleto = `${paciente.apellido} ${paciente.nombre}`.trim();
@@ -74,7 +78,9 @@ export function NuevoPacienteForm({ tipo, secciones }: Props) {
       setPaciente({
         apellido: data.paciente?.apellido || "",
         nombre: data.paciente?.nombre || "",
-        dni: data.paciente?.dni || "",
+        cuil: "",
+        dniLeido: data.paciente?.dni || "",
+        obra_social: "",
         fecha_nacimiento: data.paciente?.fecha_nacimiento || "",
       });
       setDatos(data.datos ?? {});
@@ -198,15 +204,34 @@ export function NuevoPacienteForm({ tipo, secciones }: Props) {
           onChange={(e) => setPaciente({ ...paciente, nombre: e.target.value.toUpperCase() })}
           className="rounded-xl border border-black/10 px-4 py-3 outline-blue-mid"
         />
+        {/* El DNI que pudo haber leído la planilla viaja igual: si todavía no
+            se sabe el CUIL completo, al menos el documento no se pierde. */}
+        <input type="hidden" name="dni" value={paciente.dniLeido} />
         <input
-          name="dni"
-          placeholder="DNI"
-          value={paciente.dni}
-          onChange={(e) => setPaciente({ ...paciente, dni: e.target.value })}
+          name="cuil"
+          placeholder="CUIL (XX-XXXXXXXX-X)"
+          value={paciente.cuil}
+          onChange={(e) => setPaciente({ ...paciente, cuil: e.target.value })}
+          inputMode="numeric"
+          className="rounded-xl border border-black/10 px-4 py-3 outline-blue-mid"
+        />
+        {paciente.dniLeido && !paciente.cuil && (
+          <p className="text-xs text-foreground/60">
+            La planilla traía el DNI <b>{paciente.dniLeido}</b>. Completá el CUIL
+            si lo tenés a mano; son los mismos 8 dígitos, con el prefijo y el
+            verificador.
+          </p>
+        )}
+        <input
+          name="obra_social"
+          placeholder="Obra social o prepaga"
+          value={paciente.obra_social}
+          onChange={(e) => setPaciente({ ...paciente, obra_social: e.target.value })}
           className="rounded-xl border border-black/10 px-4 py-3 outline-blue-mid"
         />
         <p className="text-xs text-foreground/50">
           El número de registro (ej. A0001) lo asigna el sistema automáticamente al guardar.
+          La edad se calcula sola con la fecha de nacimiento.
         </p>
         <label className="text-sm font-semibold text-foreground/70">
           Fecha de nacimiento

@@ -9,6 +9,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { SECCIONES_NINOS, SECCIONES_ADULTOS, CAMPOS_ACUERDO } from "@/lib/ficha-fields";
 import { parseDatosFicha, parseObservaciones } from "@/lib/observaciones";
 import { registrarAuditoria } from "@/lib/auditoria";
+import { dniDeCuil, normalizarCuil } from "@/lib/paciente-datos";
 
 // Sube una firma manuscrita (dataURL PNG del FirmaPad) al bucket privado
 // "documentos" y devuelve la ruta guardada, o null si no se firmó nada.
@@ -139,9 +140,20 @@ export async function crearPaciente(formData: FormData) {
   const tipo = String(formData.get("tipo"));
   const nombre = String(formData.get("nombre"));
   const fecha_nacimiento = String(formData.get("fecha_nacimiento") || "") || null;
-  // Se guarda solo con dígitos para que la comparación con lo ya cargado no
-  // falle por un punto de miles de diferencia.
-  const dni = String(formData.get("dni") || "").replace(/\D/g, "") || null;
+  const obra_social = String(formData.get("obra_social") || "").trim() || null;
+
+  const cuilCrudo = String(formData.get("cuil") || "").trim();
+  const cuil = cuilCrudo ? normalizarCuil(cuilCrudo) : null;
+  if (cuilCrudo && !cuil) {
+    throw new Error("El CUIL tiene que tener 11 dígitos, con el formato XX-XXXXXXXX-X.");
+  }
+
+  // El DNI sale del CUIL cuando está: es el que usan la búsqueda y el índice
+  // que impide cargar dos veces al mismo paciente. Si sólo se conoce el DNI
+  // —porque vino de una planilla— se guarda ese, sólo con dígitos, para que
+  // la comparación no falle por un punto de miles de diferencia.
+  const dni =
+    dniDeCuil(cuil) ?? (String(formData.get("dni") || "").replace(/\D/g, "") || null);
 
   // Antes de crear nada se comprueba que el paciente no esté ya cargado. La
   // búsqueda va con el cliente de servicio a propósito: si el duplicado está
@@ -164,6 +176,8 @@ export async function crearPaciente(formData: FormData) {
       nombre,
       fecha_nacimiento,
       dni,
+      cuil,
+      obra_social,
       to_asignada_id: toAsignadaId,
     })
     .select("id")

@@ -25,7 +25,7 @@ export async function GET(request: NextRequest) {
 
   const { data: paciente } = await supabase
     .from("pacientes")
-    .select("nombre, numero_registro, tipo, dni, tos(nombre)")
+    .select("nombre, numero_registro, tipo, dni, cuil, tos(nombre)")
     .eq("id", pacienteId)
     .maybeSingle();
 

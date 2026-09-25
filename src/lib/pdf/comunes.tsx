@@ -100,6 +100,7 @@ export type PacienteCabecera = {
   nombre: string;
   numero_registro: string;
   dni?: string | null;
+  cuil?: string | null;
   fecha_nacimiento?: string | null;
 };
 
@@ -122,7 +123,11 @@ export function CabeceraImpresion({
               <Text style={estilos.cabeceraPaciente}>{paciente.nombre}</Text>
               <Text style={estilos.cabeceraPacienteDatos}>
                 Nº {paciente.numero_registro}
-                {paciente.dni ? ` · DNI ${paciente.dni}` : ""}
+                {paciente.cuil
+                  ? ` · CUIL ${paciente.cuil}`
+                  : paciente.dni
+                    ? ` · DNI ${paciente.dni}`
+                    : ""}
                 {paciente.fecha_nacimiento ? ` · Nace ${paciente.fecha_nacimiento}` : ""}
               </Text>
             </>

@@ -8,6 +8,7 @@ import {
   type MetaImpresion,
 } from "@/lib/pdf/comunes";
 import { CAMPOS_ACUERDO, seccionesDe, type DatosFicha } from "@/lib/ficha-fields";
+import { documentoVisible, edadDe } from "@/lib/paciente-datos";
 
 export type PacienteBackup = {
   nombre: string;
@@ -15,6 +16,8 @@ export type PacienteBackup = {
   tipo: string;
   fecha_nacimiento: string | null;
   dni: string | null;
+  cuil?: string | null;
+  obra_social?: string | null;
   ficha?: { datos: DatosFicha } | null;
   acuerdo?: {
     valor_sesion: number;
@@ -39,7 +42,9 @@ function PacienteSection({ p }: { p: PacienteBackup }) {
       <Text style={{ ...estilos.membreteCentrado, marginBottom: 6 }}>
         Nº {p.numero_registro} · {p.tipo}
         {p.fecha_nacimiento ? ` · Nace ${p.fecha_nacimiento}` : ""}
-        {p.dni ? ` · DNI ${p.dni}` : ""}
+        {edadDe(p.fecha_nacimiento)?.texto ? ` · ${edadDe(p.fecha_nacimiento)!.texto}` : ""}
+        {documentoVisible(p.cuil, p.dni) ? ` · CUIL ${documentoVisible(p.cuil, p.dni)}` : ""}
+        {p.obra_social ? ` · ${p.obra_social}` : ""}
       </Text>
 
       <Text style={estilos.seccion}>Ficha de inicio</Text>
@@ -149,6 +154,7 @@ export function HistoriaClinicaDoc({
               nombre: p.nombre,
               numero_registro: p.numero_registro,
               dni: p.dni,
+              cuil: p.cuil,
               fecha_nacimiento: p.fecha_nacimiento,
             }}
           />

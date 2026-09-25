@@ -23,7 +23,7 @@ export default async function ListaPacientes({
 
   let query = supabase
     .from("pacientes")
-    .select("id, numero_registro, nombre, dni, tipo")
+    .select("id, numero_registro, nombre, dni, cuil, tipo")
     .eq("activo", true)
     .order("numero_registro");
 
@@ -40,7 +40,13 @@ export default async function ListaPacientes({
   // uno solo no se busca (ver MINIMO_CRITERIOS).
   if (buscando) {
     if (criterios.nro) query = query.ilike("numero_registro", criterios.nro);
-    if (criterios.dni) query = query.ilike("dni", `%${criterios.dni.replace(/\./g, "")}%`);
+    // Se busca por el DNI, que es lo que la gente recuerda. Si pegan el CUIL
+    // entero, se le sacan el prefijo y el verificador y se busca igual.
+    if (criterios.dni) {
+      const digitos = criterios.dni.replace(/\D/g, "");
+      const aBuscar = digitos.length === 11 ? digitos.slice(2, 10) : digitos || criterios.dni;
+      query = query.ilike("dni", `%${aBuscar}%`);
+    }
     if (criterios.nombre) query = query.ilike("nombre", `%${criterios.nombre}%`);
   }
 

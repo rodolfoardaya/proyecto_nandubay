@@ -6,6 +6,7 @@ import {
   estilos,
   type MetaImpresion,
 } from "@/lib/pdf/comunes";
+import { documentoVisible, edadDe } from "@/lib/paciente-datos";
 
 // La evolución sola: datos personales del paciente y, a continuación, las
 // notas. Sin ficha de inicio ni acuerdo terapéutico.
@@ -19,6 +20,8 @@ export type PacienteEvolucion = {
   tipo: string;
   fecha_nacimiento: string | null;
   dni: string | null;
+  cuil: string | null;
+  obra_social: string | null;
   to_nombre: string | null;
 };
 
@@ -66,6 +69,7 @@ export function EvolucionDoc({
             nombre: paciente.nombre,
             numero_registro: paciente.numero_registro,
             dni: paciente.dni,
+            cuil: paciente.cuil,
             fecha_nacimiento: paciente.fecha_nacimiento,
           }}
         />
@@ -77,8 +81,11 @@ export function EvolucionDoc({
         <View style={{ paddingLeft: 10 }}>
           <Dato etiqueta="Apellido y nombre" valor={paciente.nombre} />
           <Dato etiqueta="Nº de registro" valor={paciente.numero_registro} />
-          <Dato etiqueta="DNI" valor={paciente.dni} />
+          <Dato etiqueta="CUIL" valor={documentoVisible(paciente.cuil, paciente.dni)} />
           <Dato etiqueta="Fecha de nacimiento" valor={paciente.fecha_nacimiento} />
+          {/* La edad es la del día en que se imprime, no un dato guardado. */}
+          <Dato etiqueta="Edad" valor={edadDe(paciente.fecha_nacimiento)?.texto ?? null} />
+          <Dato etiqueta="Obra social" valor={paciente.obra_social} />
           <Dato etiqueta="Tipo de ficha" valor={paciente.tipo} />
           <Dato etiqueta="TO a cargo" valor={paciente.to_nombre} />
         </View>

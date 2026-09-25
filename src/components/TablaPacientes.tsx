@@ -3,17 +3,19 @@
 import Link from "next/link";
 import { useState } from "react";
 import { darDeBajaPaciente } from "@/app/panel/admin/pacientes/actions";
+import { documentoVisible } from "@/lib/paciente-datos";
 
 type Paciente = {
   id: string;
   numero_registro: string;
   nombre: string;
   dni: string | null;
+  cuil?: string | null;
   tipo: string;
 };
 
 // Listado tabular de pacientes ordenado por número de registro, con los
-// datos principales a simple vista (apellido y nombre, DNI, tipo) y
+// datos principales a simple vista (apellido y nombre, CUIL, tipo) y
 // selección para imprimir las planillas + historia clínica de varios a la
 // vez (usa el mismo endpoint de backup en PDF).
 export function TablaPacientes({
@@ -82,7 +84,7 @@ export function TablaPacientes({
               </th>
               <th className="px-4 py-3">Nº</th>
               <th className="px-4 py-3">Apellido y Nombre</th>
-              <th className="px-4 py-3">DNI</th>
+              <th className="px-4 py-3">CUIL</th>
               <th className="px-4 py-3">Tipo</th>
               {mostrarBaja && <th className="px-4 py-3">Baja</th>}
             </tr>
@@ -108,7 +110,9 @@ export function TablaPacientes({
                     {p.nombre}
                   </Link>
                 </td>
-                <td className="px-4 py-3 text-foreground/70">{p.dni ?? "—"}</td>
+                <td className="px-4 py-3 text-foreground/70">
+                  {documentoVisible(p.cuil, p.dni) ?? "—"}
+                </td>
                 <td className="px-4 py-3 capitalize text-foreground/70">{p.tipo}</td>
                 {mostrarBaja && (
                   <td className="px-4 py-3">

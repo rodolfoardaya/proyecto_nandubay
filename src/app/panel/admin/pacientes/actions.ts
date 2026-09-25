@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { requireRole } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { registrarAuditoria } from "@/lib/auditoria";
+import { dniDeCuil, normalizarCuil } from "@/lib/paciente-datos";
 
 // Corrección de los datos personales del paciente: lo que se cargó mal en el
 // alta y hasta ahora sólo se podía mirar. El número de registro no se toca —
@@ -21,18 +22,35 @@ export async function actualizarDatosPaciente(formData: FormData) {
   const nombre = String(formData.get("nombre") || "").trim();
   const tipo = String(formData.get("tipo") || "");
   const fecha_nacimiento = String(formData.get("fecha_nacimiento") || "") || null;
-  // Igual que en el alta: sólo dígitos, para que la comparación con lo ya
-  // cargado no falle por un punto de miles de diferencia.
-  const dni = String(formData.get("dni") || "").replace(/\D/g, "") || null;
+  const obra_social = String(formData.get("obra_social") || "").trim() || null;
+  const cuilCrudo = String(formData.get("cuil") || "").trim();
 
   if (!nombre) throw new Error("El apellido y nombre no puede quedar vacío.");
   if (tipo !== "nino" && tipo !== "adulto") {
     throw new Error("El tipo de ficha tiene que ser niño o adulto.");
   }
 
+  const cuil = cuilCrudo ? normalizarCuil(cuilCrudo) : null;
+  if (cuilCrudo && !cuil) {
+    throw new Error(
+      "El CUIL tiene que tener 11 dígitos, con el formato XX-XXXXXXXX-X."
+    );
+  }
+
+  // El DNI se deriva del CUIL, no se carga aparte: de él dependen la búsqueda
+  // y el índice que impide cargar dos veces al mismo paciente. Si no se cargó
+  // un CUIL, el DNI que ya estuviera guardado se deja como está.
+  const cambios: Record<string, string | null> = { nombre, tipo, fecha_nacimiento, obra_social };
+  if (cuil) {
+    cambios.cuil = cuil;
+    cambios.dni = dniDeCuil(cuil);
+  } else if (!cuilCrudo) {
+    cambios.cuil = null;
+  }
+
   const { error } = await supabase
     .from("pacientes")
-    .update({ nombre, tipo, fecha_nacimiento, dni })
+    .update(cambios)
     .eq("id", paciente_id);
 
   if (error) {

@@ -39,7 +39,7 @@ export function BuscadorPacientes({
     <form action={base} className="mt-4 rounded-2xl bg-white p-5 shadow-sm">
       <p className="font-bold text-green-dark">Buscar una historia clínica</p>
       <p className="mt-1 text-xs text-foreground/60">
-        Buscá por número de registro, DNI o apellido y nombre.
+        Buscá por número de registro, DNI o CUIL, o apellido y nombre.
       </p>
       <div className="mt-3 grid gap-3 sm:grid-cols-3">
         <label className="text-xs font-semibold text-foreground/70">
@@ -48,7 +48,7 @@ export function BuscadorPacientes({
         </label>
         <label className="text-xs font-semibold text-foreground/70">
           DNI
-          <input name="dni" defaultValue={criterios.dni} placeholder="Sin puntos" className={`mt-1 w-full ${CAMPO}`} />
+          <input name="dni" defaultValue={criterios.dni} placeholder="DNI o CUIL, sin puntos" className={`mt-1 w-full ${CAMPO}`} />
         </label>
         <label className="text-xs font-semibold text-foreground/70">
           Apellido y nombre

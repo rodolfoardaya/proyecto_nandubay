@@ -19,7 +19,7 @@ export async function GET(request: NextRequest) {
   // RLS ya restringe: una TO solo ve sus propios pacientes, Admin ve todos.
   let query = supabase
     .from("pacientes")
-    .select("id, nombre, numero_registro, tipo, fecha_nacimiento, dni")
+    .select("id, nombre, numero_registro, tipo, fecha_nacimiento, dni, cuil, obra_social")
     .order("nombre");
 
   if (pacienteId) {
@@ -64,6 +64,8 @@ export async function GET(request: NextRequest) {
       tipo: p.tipo,
       fecha_nacimiento: p.fecha_nacimiento,
       dni: p.dni,
+      cuil: p.cuil,
+      obra_social: p.obra_social,
       ficha: ficha as PacienteBackup["ficha"],
       acuerdo: acuerdo as PacienteBackup["acuerdo"],
       evolucion: evolucion ?? [],

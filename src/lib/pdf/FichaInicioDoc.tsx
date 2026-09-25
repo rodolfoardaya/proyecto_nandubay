@@ -8,25 +8,18 @@ import {
   type MetaImpresion,
 } from "@/lib/pdf/comunes";
 import { seccionesDe, tituloFicha, keyDeOpcion, type DatosFicha } from "@/lib/ficha-fields";
+import { documentoVisible, edadDe } from "@/lib/paciente-datos";
 
 export type PacienteFicha = {
   nombre: string;
   numero_registro: string;
   tipo: string;
   dni: string | null;
+  cuil?: string | null;
+  obra_social?: string | null;
   fecha_nacimiento: string | null;
   to_nombre?: string | null;
 };
-
-function edad(fechaNacimiento: string | null): string {
-  if (!fechaNacimiento) return "";
-  const nacimiento = new Date(fechaNacimiento);
-  const hoy = new Date();
-  let años = hoy.getFullYear() - nacimiento.getFullYear();
-  const mes = hoy.getMonth() - nacimiento.getMonth();
-  if (mes < 0 || (mes === 0 && hoy.getDate() < nacimiento.getDate())) años--;
-  return años >= 0 ? `${años} años` : "";
-}
 
 function Dato({ etiqueta, valor }: { etiqueta: string; valor?: string | null }) {
   return (
@@ -60,6 +53,7 @@ export function FichaInicioDoc({
             nombre: paciente.nombre,
             numero_registro: paciente.numero_registro,
             dni: paciente.dni,
+            cuil: paciente.cuil,
             fecha_nacimiento: paciente.fecha_nacimiento,
           }}
         />
@@ -74,11 +68,12 @@ export function FichaInicioDoc({
         <Dato etiqueta="Nombre y apellido" valor={paciente.nombre} />
         <Dato
           etiqueta="Fecha de nacimiento / Edad"
-          valor={[paciente.fecha_nacimiento, edad(paciente.fecha_nacimiento)]
+          valor={[paciente.fecha_nacimiento, edadDe(paciente.fecha_nacimiento)?.texto]
             .filter(Boolean)
             .join("   ")}
         />
-        <Dato etiqueta="DNI" valor={paciente.dni} />
+        <Dato etiqueta="CUIL" valor={documentoVisible(paciente.cuil, paciente.dni)} />
+        <Dato etiqueta="Obra social" valor={paciente.obra_social} />
         {paciente.to_nombre && <Dato etiqueta="Terapista Ocupacional" valor={paciente.to_nombre} />}
 
         {secciones.map((seccion, i) => (

@@ -13,7 +13,7 @@ export default async function ListaPacientesAdmin() {
   const { data: tos } = await supabase.from("tos").select("id, nombre, letra").order("nombre");
   const { data: pacientes } = await supabase
     .from("pacientes")
-    .select("id, numero_registro, nombre, dni, tipo, to_asignada_id, activo, baja_at, baja_motivo")
+    .select("id, numero_registro, nombre, dni, cuil, tipo, to_asignada_id, activo, baja_at, baja_motivo")
     .order("numero_registro");
 
   const dadosDeBaja = (pacientes ?? []).filter((p) => p.activo === false);
