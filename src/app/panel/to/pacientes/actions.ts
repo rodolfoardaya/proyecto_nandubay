@@ -238,6 +238,51 @@ export async function crearPaciente(formData: FormData) {
   redirect(`/panel/${usuario.rol}/pacientes/${paciente.id}`);
 }
 
+// El CUIL lo carga y lo corrige también la TO, no sólo el admin: es el dato
+// que le piden a la familia en la primera sesión y el que hace falta para
+// facturar, así que esperar a que lo cargue otro traba el trabajo del día.
+//
+// El resto de los datos personales —nombre, fecha de nacimiento, tipo de
+// ficha— sigue siendo del admin: esos identifican la historia clínica.
+//
+// Qué paciente puede tocar cada TO no lo decide esta función: lo decide la
+// policy `pacientes_write`, que en la base misma limita a cada TO a los suyos.
+export async function actualizarCuilPaciente(formData: FormData) {
+  const usuario = await requireRole("to", "admin");
+  const supabase = await createClient();
+
+  const paciente_id = String(formData.get("paciente_id"));
+  const cuilCrudo = String(formData.get("cuil") || "").trim();
+
+  if (!cuilCrudo) throw new Error("Escribí el CUIL antes de guardar.");
+
+  const cuil = normalizarCuil(cuilCrudo);
+  if (!cuil) {
+    throw new Error("El CUIL tiene que tener 11 dígitos, con el formato XX-XXXXXXXX-X.");
+  }
+
+  // El DNI se mantiene sincronizado con el CUIL: de él dependen la búsqueda y
+  // el índice que impide cargar dos veces al mismo paciente.
+  const { error } = await supabase
+    .from("pacientes")
+    .update({ cuil, dni: dniDeCuil(cuil) })
+    .eq("id", paciente_id);
+
+  if (error) {
+    // 23505 es el índice único de 0014: ese documento ya está en otro paciente.
+    if (error.code === "23505") {
+      throw new Error(
+        "Ese documento ya figura en otro paciente activo. Revisá el listado antes de insistir: " +
+          "puede ser el mismo paciente cargado dos veces."
+      );
+    }
+    throw new Error(error.message);
+  }
+
+  revalidatePath(`/panel/${usuario.rol}/pacientes/${paciente_id}`);
+  revalidatePath(`/panel/${usuario.rol}/pacientes`);
+}
+
 export async function actualizarFichaInicio(formData: FormData) {
   const usuario = await requireRole("to", "admin");
   const supabase = await createClient();

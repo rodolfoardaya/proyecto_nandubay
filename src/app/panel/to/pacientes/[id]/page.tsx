@@ -7,6 +7,7 @@ import { calcularDatosFaltantes } from "@/lib/datos-faltantes";
 import { SECCIONES_PACIENTE } from "@/lib/paciente-vista";
 import { BotonEnvio } from "@/components/ui/BotonEnvio";
 import { actualizarDatosPaciente } from "@/app/panel/admin/pacientes/actions";
+import { actualizarCuilPaciente } from "@/app/panel/to/pacientes/actions";
 import { documentoVisible, edadDe } from "@/lib/paciente-datos";
 
 // Portada del paciente: sus datos y el acceso a cada parte de la historia.
@@ -147,6 +148,42 @@ export default async function PortadaPaciente({
               </p>
               <BotonEnvio variant="secondary" className="justify-self-start sm:col-span-2">
                 Guardar datos personales
+              </BotonEnvio>
+            </form>
+          </details>
+        )}
+
+        {/* La TO carga y corrige el CUIL de sus pacientes: es lo que pide en la
+            primera sesión y lo que hace falta para facturar. El resto de los
+            datos personales sigue siendo del admin. */}
+        {usuario.rol === "to" && (
+          <details className="mt-4">
+            <summary className="cursor-pointer text-xs font-semibold text-blue-mid">
+              {paciente.cuil ? "Corregir el CUIL" : "Cargar el CUIL"}
+            </summary>
+            <form action={actualizarCuilPaciente} className="mt-3 grid max-w-sm gap-2">
+              <input type="hidden" name="paciente_id" value={id} />
+              <label className="text-xs font-semibold text-foreground/70">
+                CUIL
+                <input
+                  required
+                  name="cuil"
+                  defaultValue={paciente.cuil ?? ""}
+                  placeholder="XX-XXXXXXXX-X"
+                  inputMode="numeric"
+                  className="mt-1 w-full rounded-xl border border-black/10 px-3 py-2 text-sm outline-blue-mid"
+                />
+                {!paciente.cuil && paciente.dni && (
+                  <span className="mt-1 block font-normal text-foreground/60">
+                    DNI cargado: {paciente.dni}
+                  </span>
+                )}
+              </label>
+              <p className="text-xs text-foreground/60">
+                Los otros datos personales los corrige la administración.
+              </p>
+              <BotonEnvio variant="secondary" className="justify-self-start">
+                Guardar CUIL
               </BotonEnvio>
             </form>
           </details>
