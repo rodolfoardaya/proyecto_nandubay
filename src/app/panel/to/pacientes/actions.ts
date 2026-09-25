@@ -9,6 +9,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { SECCIONES_NINOS, SECCIONES_ADULTOS, CAMPOS_ACUERDO } from "@/lib/ficha-fields";
 import { parseDatosFicha, parseObservaciones } from "@/lib/observaciones";
 import { registrarAuditoria } from "@/lib/auditoria";
+import { excedeElMaximo, mensajeArchivoGrande } from "@/lib/archivos";
 import { dniDeCuil, normalizarCuil } from "@/lib/paciente-datos";
 
 // Sube una firma manuscrita (dataURL PNG del FirmaPad) al bucket privado
@@ -41,6 +42,8 @@ async function subirArchivo(
   carpeta: string
 ): Promise<string | null> {
   if (!archivo || archivo.size === 0) return null;
+
+  if (excedeElMaximo(archivo.size)) throw new Error(mensajeArchivoGrande(archivo.size));
 
   const path = `${carpeta}/${Date.now()}-${nombreSeguro(archivo.name)}`;
   const { error } = await supabase.storage.from("documentos").upload(path, archivo, {

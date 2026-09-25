@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { requireRole } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
+import { excedeElMaximo, mensajeArchivoGrande } from "@/lib/archivos";
 
 export async function cargarFactura(formData: FormData) {
   const usuario = await requireRole("to", "admin");
@@ -25,6 +26,8 @@ export async function cargarFactura(formData: FormData) {
 
   let archivo_pdf_url: string | null = null;
   if (archivo && archivo.size > 0) {
+    if (excedeElMaximo(archivo.size)) throw new Error(mensajeArchivoGrande(archivo.size));
+
     const path = `${to_id}/${Date.now()}-${archivo.name}`;
     const { error: uploadError } = await supabase.storage.from("facturas").upload(path, archivo);
     if (uploadError) throw new Error(uploadError.message);

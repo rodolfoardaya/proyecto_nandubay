@@ -1,5 +1,5 @@
-import { Button } from "@/components/ui/Button";
 import { BotonEnvio } from "@/components/ui/BotonEnvio";
+import { MAXIMO_ARCHIVO_MB } from "@/lib/archivos";
 import {
   subirDocumentoPaciente,
   archivarDocumentoPaciente,
@@ -131,7 +131,8 @@ export function DocumentosPaciente({
               className="rounded-xl border border-black/10 px-4 py-2.5 text-sm"
             />
             <p className="text-xs text-foreground/50">
-              PDF o foto. Queda guardado en la historia clínica del paciente.
+              PDF o foto, hasta {MAXIMO_ARCHIVO_MB} MB. Queda guardado en la
+              historia clínica del paciente.
             </p>
             <BotonEnvio variant="secondary" enCurso="Subiendo..." className="justify-self-start">
               Cargar documento

@@ -6,6 +6,7 @@ import { requireRole } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { registrarAuditoria } from "@/lib/auditoria";
+import { excedeElMaximo, mensajeArchivoGrande } from "@/lib/archivos";
 
 // Sin caracteres que se confundan al dictarla o anotarla (O/0, I/1, l).
 function generarClaveProvisoria(): string {
@@ -240,6 +241,8 @@ export async function subirFotoTo(formData: FormData) {
   if (!archivo) {
     throw new Error("No se seleccionó archivo");
   }
+
+  if (excedeElMaximo(archivo.size)) throw new Error(mensajeArchivoGrande(archivo.size));
 
   // Subir a Storage
   const path = `tos/${to_id}/${Date.now()}-${archivo.name}`;
