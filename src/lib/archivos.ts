@@ -4,7 +4,7 @@
 // next.config.ts: ese margen es lo que permite que un archivo apenas pasado de
 // medida llegue hasta el servidor y reciba un mensaje que se entiende, en vez
 // de chocar contra el límite de Next y morir sin explicación.
-export const MAXIMO_ARCHIVO_MB = 15;
+export const MAXIMO_ARCHIVO_MB = 30;
 
 export function excedeElMaximo(bytes: number): boolean {
   return bytes > MAXIMO_ARCHIVO_MB * 1024 * 1024;

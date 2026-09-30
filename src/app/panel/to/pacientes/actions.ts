@@ -9,7 +9,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { SECCIONES_NINOS, SECCIONES_ADULTOS, CAMPOS_ACUERDO } from "@/lib/ficha-fields";
 import { parseDatosFicha, parseObservaciones } from "@/lib/observaciones";
 import { registrarAuditoria } from "@/lib/auditoria";
-import { excedeElMaximo, mensajeArchivoGrande } from "@/lib/archivos";
+import { MAXIMO_ARCHIVO_MB, excedeElMaximo, mensajeArchivoGrande } from "@/lib/archivos";
 import { dniDeCuil, normalizarCuil } from "@/lib/paciente-datos";
 
 // Sube una firma manuscrita (dataURL PNG del FirmaPad) al bucket privado
@@ -460,7 +460,19 @@ export async function invitarFamiliar(formData: FormData) {
 // Documentos sueltos del paciente: estudios, informes de otros profesionales,
 // certificados. La ficha y el acuerdo guardan su escaneo aparte; esto es para
 // todo lo demás, que antes no tenía dónde ir.
-export async function subirDocumentoPaciente(formData: FormData) {
+export type EstadoDocumento = { ok: boolean; mensaje: string } | null;
+
+// Carga de un estudio o informe del paciente.
+//
+// Devuelve el resultado en vez de lanzar una excepción, a propósito. En el
+// servidor de producción Next oculta el texto de cualquier error lanzado y
+// muestra sólo un número: la pantalla se caía con "A server error occurred" y
+// no había forma de saber si el archivo era grande, si el título faltaba o si
+// Storage lo había rechazado. Cada motivo tiene que poder leerse en pantalla.
+export async function subirDocumentoPaciente(
+  _previo: EstadoDocumento,
+  formData: FormData
+): Promise<EstadoDocumento> {
   const usuario = await requireRole("to", "admin");
   const supabase = await createClient();
 
@@ -470,31 +482,45 @@ export async function subirDocumentoPaciente(formData: FormData) {
   const descripcion = String(formData.get("descripcion") || "").trim();
   const archivo = formData.get("archivo") as File | null;
 
-  if (!archivo || archivo.size === 0) {
-    throw new Error("No se seleccionó ningún archivo");
-  }
   if (!titulo) {
-    throw new Error("Falta el título del documento");
+    return { ok: false, mensaje: "Falta el título del documento." };
+  }
+  if (!archivo || archivo.size === 0) {
+    return {
+      ok: false,
+      mensaje:
+        "No llegó ningún archivo. Si el PDF es muy grande pudo cortarse en el " +
+        `camino: probá con uno de hasta ${MAXIMO_ARCHIVO_MB} MB.`,
+    };
+  }
+  if (excedeElMaximo(archivo.size)) {
+    return { ok: false, mensaje: mensajeArchivoGrande(archivo.size) };
   }
 
-  const ruta = await subirArchivo(supabase, archivo, `documentos/${paciente_id}`);
-  if (!ruta) throw new Error("No se pudo subir el archivo");
+  try {
+    const ruta = await subirArchivo(supabase, archivo, `documentos/${paciente_id}`);
+    if (!ruta) return { ok: false, mensaje: "No se pudo guardar el archivo." };
 
-  const { error } = await supabase.from("documentos_paciente").insert({
-    paciente_id,
-    tipo,
-    titulo,
-    descripcion: descripcion || null,
-    archivo_url: ruta,
-    nombre_original: archivo.name,
-    tamano_bytes: archivo.size,
-    subido_por: usuario.id,
-  });
+    const { error } = await supabase.from("documentos_paciente").insert({
+      paciente_id,
+      tipo,
+      titulo,
+      descripcion: descripcion || null,
+      archivo_url: ruta,
+      nombre_original: archivo.name,
+      tamano_bytes: archivo.size,
+      subido_por: usuario.id,
+    });
 
-  if (error) throw new Error(error.message);
+    if (error) return { ok: false, mensaje: `No se pudo registrar: ${error.message}` };
+  } catch (e) {
+    return { ok: false, mensaje: (e as Error).message };
+  }
 
   await registrarAuditoria("carga_documento", `${titulo} — paciente ${paciente_id}`);
   revalidatePath(`/panel/${usuario.rol}/pacientes/${paciente_id}`);
+
+  return { ok: true, mensaje: `Se guardó "${titulo}".` };
 }
 
 // No se borra la fila: forma parte de la historia clínica. Se marca como no
