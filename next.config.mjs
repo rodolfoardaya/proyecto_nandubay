@@ -1,6 +1,14 @@
-import type { NextConfig } from "next";
+// Este archivo está en JavaScript y no en TypeScript a propósito.
+//
+// Con `next.config.ts`, Next tiene que compilarlo antes de leerlo, y para eso
+// usa su compilador nativo. En el servidor de Hostinger ese compilador no
+// carga —la versión de GLIBC del sistema es más vieja que la que necesita—,
+// así que el archivo compilado nunca se generaba y el build moría buscando un
+// temporal inexistente. Un `.mjs` es un módulo de Node común: se lee tal cual,
+// sin compilar nada, y ese paso deja de existir.
 
-const nextConfig: NextConfig = {
+/** @type {import('next').NextConfig} */
+const nextConfig = {
   experimental: {
     serverActions: {
       // Next limita el cuerpo de una Server Action a 1 MB. Todas las subidas del
