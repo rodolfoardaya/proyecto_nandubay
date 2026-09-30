@@ -518,13 +518,20 @@ export async function subirDocumentoPaciente(
   }
 
   await registrarAuditoria("carga_documento", `${titulo} — paciente ${paciente_id}`);
-  revalidatePath(`/panel/${usuario.rol}/pacientes/${paciente_id}`);
+  refrescarDocumentos(usuario.rol, paciente_id);
 
   return { ok: true, mensaje: `Se guardó "${titulo}".` };
 }
 
+// La lista de documentos vive en su propia página, no en la del paciente:
+// refrescar sólo la del paciente dejaba la lista con los datos viejos.
+function refrescarDocumentos(rol: string, paciente_id: string) {
+  revalidatePath(`/panel/${rol}/pacientes/${paciente_id}`);
+  revalidatePath(`/panel/${rol}/pacientes/${paciente_id}/documentos`);
+}
+
 // No se borra la fila: forma parte de la historia clínica. Se marca como no
-// vigente y deja de listarse.
+// vigente y deja de listarse, y se puede volver a mostrar.
 export async function archivarDocumentoPaciente(formData: FormData) {
   const usuario = await requireRole("to", "admin");
   const supabase = await createClient();
@@ -540,5 +547,24 @@ export async function archivarDocumentoPaciente(formData: FormData) {
   if (error) throw new Error(error.message);
 
   await registrarAuditoria("archivado_documento", `documento ${documento_id}`);
-  revalidatePath(`/panel/${usuario.rol}/pacientes/${paciente_id}`);
+  refrescarDocumentos(usuario.rol, paciente_id);
+}
+
+// Vuelve a mostrar un documento que se había quitado de la lista.
+export async function restaurarDocumentoPaciente(formData: FormData) {
+  const usuario = await requireRole("to", "admin");
+  const supabase = await createClient();
+
+  const documento_id = String(formData.get("documento_id"));
+  const paciente_id = String(formData.get("paciente_id"));
+
+  const { error } = await supabase
+    .from("documentos_paciente")
+    .update({ vigente: true })
+    .eq("id", documento_id);
+
+  if (error) throw new Error(error.message);
+
+  await registrarAuditoria("restaurado_documento", `documento ${documento_id}`);
+  refrescarDocumentos(usuario.rol, paciente_id);
 }
