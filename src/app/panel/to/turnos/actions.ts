@@ -27,7 +27,7 @@ export async function crearTurno(formData: FormData) {
 
   const { data: paciente } = await supabase
     .from("pacientes")
-    .select("nombre, to_asignada_id, tos(nombre)")
+    .select("nombre, numero_registro, to_asignada_id, tos(nombre)")
     .eq("id", paciente_id)
     .single();
 
@@ -59,7 +59,9 @@ export async function crearTurno(formData: FormData) {
     duracionMinutos: duracion_minutos,
     frecuencia: frecuencia as "unica" | "semanal",
     hasta: fecha_fin,
-    pacienteNombre: paciente.nombre,
+    // Al calendario va el número de registro, no el nombre: ver la nota en
+    // google-calendar.ts sobre por qué los datos del paciente no salen afuera.
+    pacienteRegistro: paciente.numero_registro,
     modalidad: modalidad as "presencial" | "online",
     /* @ts-expect-error relación anidada */
     toNombre: paciente.tos?.nombre ?? "TO",
@@ -128,7 +130,7 @@ export async function actualizarTurno(formData: FormData) {
 
   const { data: actual } = await supabase
     .from("turnos")
-    .select("google_event_id, pacientes(nombre), tos(nombre)")
+    .select("google_event_id, pacientes(numero_registro), tos(nombre)")
     .eq("id", turno_id)
     .single();
 
@@ -152,7 +154,7 @@ export async function actualizarTurno(formData: FormData) {
     hora,
     duracionMinutos: duracion_minutos,
     /* @ts-expect-error relación anidada */
-    pacienteNombre: actual?.pacientes?.nombre ?? "Paciente",
+    pacienteRegistro: actual?.pacientes?.numero_registro ?? "Sin registro",
     modalidad: modalidad as "presencial" | "online",
     /* @ts-expect-error relación anidada */
     toNombre: actual?.tos?.nombre ?? "TO",

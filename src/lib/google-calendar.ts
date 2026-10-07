@@ -131,12 +131,28 @@ type TurnoEvento = {
   fecha: string; // YYYY-MM-DD
   hora: string; // HH:MM
   duracionMinutos: number;
-  pacienteNombre: string;
+  pacienteRegistro: string; // número de registro, nunca el nombre
   modalidad: "presencial" | "online";
   toNombre: string;
   frecuencia?: "unica" | "semanal";
   hasta?: string | null; // AAAA-MM-DD, tope de la serie
 };
+
+// Qué se escribe en el evento de Google.
+//
+// Va el número de registro del paciente y no su nombre, a propósito. Google
+// está en Estados Unidos, que no integra la lista de países con nivel adecuado
+// de protección de la Disposición 60-E/2016. Aunque no se mande ningún dato
+// clínico, asociar a una persona con nombre y apellido a un consultorio de
+// Terapia Ocupacional ya permite inferir información de salud, y la mayoría de
+// los pacientes son chicos.
+//
+// Con el número de registro la TO identifica el turno igual —lo tiene a la
+// vista en el sistema— y afuera no sale nada que permita saber de quién se
+// trata. Es más sencillo que justificar la transferencia.
+function tituloEvento(turno: TurnoEvento) {
+  return `${turno.pacienteRegistro} — ${turno.toNombre}`;
+}
 
 // Suma minutos a "HH:MM" sin pasar por Date: convertir a Date usa la zona
 // horaria del servidor, que en el hosting no es la nuestra, y el turno
@@ -170,7 +186,7 @@ export async function crearEventoCalendar(turno: TurnoEvento): Promise<string | 
       .insert({
         calendarId: CALENDAR_ID!,
         requestBody: {
-          summary: `${turno.pacienteNombre} — ${turno.toNombre}`,
+          summary: tituloEvento(turno),
           description: `Turno ${turno.modalidad} — Ñandubay`,
           // La hora va como texto local con su zona: sin convertir a UTC, no
           // depende de dónde esté corriendo el servidor.
@@ -219,7 +235,7 @@ export async function actualizarEventoCalendar(
       calendarId: CALENDAR_ID!,
       eventId: googleEventId,
       requestBody: {
-        summary: `${turno.pacienteNombre} — ${turno.toNombre}`,
+        summary: tituloEvento(turno),
         description: `Turno ${turno.modalidad} — Ñandubay`,
         start: { dateTime: `${turno.fecha}T${turno.hora}:00`, timeZone: ZONA },
         end: { dateTime: `${turno.fecha}T${horaFin}:00`, timeZone: ZONA },
