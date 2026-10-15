@@ -85,20 +85,27 @@ async function buscarPacienteExistente({
   const admin = createAdminClient();
   const columnas = "numero_registro, nombre, activo, tos(nombre)";
 
+  // Se pide una fila con `limit(1)` y no con `maybeSingle`, a propósito:
+  // maybeSingle devuelve error cuando hay más de una coincidencia, y acá eso
+  // no es un caso raro sino justamente el que importa —un paciente ya cargado
+  // dos veces—. Como el error se descartaba, la comprobación contestaba "no
+  // existe" cuando más tenía que avisar: el alta seguía y recién fallaba
+  // contra el índice único de la base, sin explicación.
   const soloDigitos = (dni ?? "").replace(/\D/g, "");
   if (soloDigitos) {
     const { data } = await admin
       .from("pacientes")
       .select(columnas)
       .eq("dni", soloDigitos)
-      .maybeSingle();
-    if (data) {
+      .limit(1);
+    const fila = data?.[0];
+    if (fila) {
       return {
-        numero_registro: data.numero_registro,
-        nombre: data.nombre,
-        activo: data.activo,
+        numero_registro: fila.numero_registro,
+        nombre: fila.nombre,
+        activo: fila.activo,
         // @ts-expect-error relación anidada
-        to: data.tos?.nombre as string | undefined,
+        to: fila.tos?.nombre as string | undefined,
       };
     }
   }
@@ -113,15 +120,16 @@ async function buscarPacienteExistente({
     .select(columnas)
     .ilike("nombre", limpio)
     .eq("fecha_nacimiento", fecha_nacimiento)
-    .maybeSingle();
+    .limit(1);
 
-  if (!data) return null;
+  const fila = data?.[0];
+  if (!fila) return null;
   return {
-    numero_registro: data.numero_registro,
-    nombre: data.nombre,
-    activo: data.activo,
+    numero_registro: fila.numero_registro,
+    nombre: fila.nombre,
+    activo: fila.activo,
     // @ts-expect-error relación anidada
-    to: data.tos?.nombre as string | undefined,
+    to: fila.tos?.nombre as string | undefined,
   };
 }
 
