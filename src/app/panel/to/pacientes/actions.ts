@@ -125,11 +125,24 @@ async function buscarPacienteExistente({
   };
 }
 
-export async function crearPaciente(formData: FormData) {
+export type EstadoAlta = { ok: boolean; mensaje: string } | null;
+
+// Alta de un paciente.
+//
+// Los motivos por los que un alta no se puede hacer —el paciente ya está
+// cargado, el CUIL no cierra, el escaneo pesa de más— se devuelven, no se
+// lanzan. En el servidor de producción Next oculta el texto de cualquier
+// excepción y deja sólo un número de error: la TO veía "A server error
+// occurred" y la pantalla caída, en lugar de "ese paciente ya está cargado
+// como A0015". Seis mensajes escritos con cuidado no llegaban nunca.
+export async function crearPaciente(
+  _previo: EstadoAlta,
+  formData: FormData
+): Promise<EstadoAlta> {
   const usuario = await requireRole("to", "admin");
   // El alta de pacientes es exclusiva de la TO; el admin solo modifica.
   if (usuario.rol === "admin") {
-    throw new Error("El alta de pacientes es exclusiva de las TO.");
+    return { ok: false, mensaje: "El alta de pacientes es exclusiva de las TO." };
   }
   const supabase = await createClient();
 
@@ -148,7 +161,10 @@ export async function crearPaciente(formData: FormData) {
   const cuilCrudo = String(formData.get("cuil") || "").trim();
   const cuil = cuilCrudo ? normalizarCuil(cuilCrudo) : null;
   if (cuilCrudo && !cuil) {
-    throw new Error("El CUIL tiene que tener 11 dígitos, con el formato XX-XXXXXXXX-X.");
+    return {
+      ok: false,
+      mensaje: "El CUIL tiene que tener 11 dígitos, con el formato XX-XXXXXXXX-X.",
+    };
   }
 
   // El DNI sale del CUIL cuando está: es el que usan la búsqueda y el índice
@@ -163,11 +179,15 @@ export async function crearPaciente(formData: FormData) {
   // asignado a otra TO, por RLS esta TO no lo vería y lo cargaría de nuevo.
   const duplicado = await buscarPacienteExistente({ dni, nombre, fecha_nacimiento });
   if (duplicado) {
-    throw new Error(
-      `Ese paciente ya está cargado como ${duplicado.numero_registro} — ${duplicado.nombre}` +
+    return {
+      ok: false,
+      mensaje:
+        `Ese paciente ya está cargado como ${duplicado.numero_registro} — ${duplicado.nombre}` +
         (duplicado.to ? `, a cargo de ${duplicado.to}.` : ".") +
-        (duplicado.activo === false ? " Está dado de baja: se puede reactivar en vez de crearlo otra vez." : "")
-    );
+        (duplicado.activo === false
+          ? " Está dado de baja: se puede reactivar en vez de crearlo otra vez."
+          : ""),
+    };
   }
 
   // numero_registro no se manda: lo asigna el default de la tabla
@@ -190,54 +210,72 @@ export async function crearPaciente(formData: FormData) {
     // 23505 es la violación de índice único: la red de seguridad de la base
     // frente a un doble envío que le gana de mano a la comprobación previa.
     if (error?.code === "23505") {
-      throw new Error(
-        "Ese paciente ya está cargado. Si acabás de apretar Guardar dos veces, " +
-          "revisá el listado antes de volver a intentarlo: es probable que ya esté."
-      );
+      return {
+        ok: false,
+        mensaje:
+          "Ese paciente ya está cargado. Si acabás de apretar Guardar dos veces, " +
+          "revisá el listado antes de volver a intentarlo: es probable que ya esté.",
+      };
     }
-    throw new Error(error?.message ?? "No se pudo crear el paciente");
+    return { ok: false, mensaje: error?.message ?? "No se pudo crear el paciente." };
   }
 
-  const secciones = tipo === "adulto" ? SECCIONES_ADULTOS : SECCIONES_NINOS;
-  const datos = parseDatosFicha(formData, secciones);
-  const archivoFichaUrl = await subirArchivo(
-    supabase,
-    formData.get("archivo_ficha") as File | null,
-    "fichas"
-  );
-
-  await supabase.from("fichas_inicio").insert({
-    paciente_id: paciente.id,
-    datos,
-    archivo_adjunto_url: archivoFichaUrl,
-  });
-
-  // Acuerdo terapéutico: se completa en la misma alta si se cargó un valor
-  // de sesión (digital o leído del PDF/foto manuscrita).
-  const valorSesion = String(formData.get("valor_sesion") || "");
-  if (valorSesion.trim()) {
-    const firma_url = await subirFirma(supabase, String(formData.get("firma") || ""), "acuerdos");
-    const archivoAcuerdoUrl = await subirArchivo(
+  // De acá en adelante el paciente ya existe. Si algo falla ahora —un escaneo
+  // pasado de medida, un rechazo del almacenamiento— no se puede dejar caer la
+  // pantalla: hay que decir que el paciente quedó creado y qué fue lo que no
+  // entró, o la TO lo carga de nuevo creyendo que no se guardó nada.
+  try {
+    const secciones = tipo === "adulto" ? SECCIONES_ADULTOS : SECCIONES_NINOS;
+    const datos = parseDatosFicha(formData, secciones);
+    const archivoFichaUrl = await subirArchivo(
       supabase,
-      formData.get("archivo_acuerdo") as File | null,
-      "acuerdos"
+      formData.get("archivo_ficha") as File | null,
+      "fichas"
     );
-    const observaciones = parseObservaciones(formData, CAMPOS_ACUERDO);
-    await supabase.from("acuerdos_terapeuticos").insert({
+
+    await supabase.from("fichas_inicio").insert({
       paciente_id: paciente.id,
-      valor_sesion: Number(valorSesion),
-      forma_pago: String(formData.get("forma_pago") || "") || null,
-      duracion_sesion_minutos: Number(formData.get("duracion_sesion_minutos") || 45),
-      modalidad: String(formData.get("modalidad") || "presencial"),
-      autoriza_imagenes: formData.get("autoriza_imagenes") === "on",
-      firma_url,
-      archivo_adjunto_url: archivoAcuerdoUrl,
-      observaciones,
+      datos,
+      archivo_adjunto_url: archivoFichaUrl,
     });
+
+    // Acuerdo terapéutico: se completa en la misma alta si se cargó un valor
+    // de sesión (digital o leído del PDF/foto manuscrita).
+    const valorSesion = String(formData.get("valor_sesion") || "");
+    if (valorSesion.trim()) {
+      const firma_url = await subirFirma(supabase, String(formData.get("firma") || ""), "acuerdos");
+      const archivoAcuerdoUrl = await subirArchivo(
+        supabase,
+        formData.get("archivo_acuerdo") as File | null,
+        "acuerdos"
+      );
+      const observaciones = parseObservaciones(formData, CAMPOS_ACUERDO);
+      await supabase.from("acuerdos_terapeuticos").insert({
+        paciente_id: paciente.id,
+        valor_sesion: Number(valorSesion),
+        forma_pago: String(formData.get("forma_pago") || "") || null,
+        duracion_sesion_minutos: Number(formData.get("duracion_sesion_minutos") || 45),
+        modalidad: String(formData.get("modalidad") || "presencial"),
+        autoriza_imagenes: formData.get("autoriza_imagenes") === "on",
+        firma_url,
+        archivo_adjunto_url: archivoAcuerdoUrl,
+        observaciones,
+      });
+    }
+  } catch (e) {
+    revalidatePath("/panel/to/pacientes");
+    return {
+      ok: false,
+      mensaje:
+        `El paciente quedó creado, pero no se pudo completar la ficha: ${(e as Error).message} ` +
+        "Buscalo en el listado y completá lo que falte desde su pantalla, sin darlo de alta otra vez.",
+    };
   }
 
   revalidatePath("/panel/to/pacientes");
   revalidatePath("/panel/admin/pacientes");
+  // El redirect va afuera del try: Next lo implementa lanzando una señal
+  // interna, y atraparla dejaría al usuario parado en el formulario.
   redirect(`/panel/${usuario.rol}/pacientes/${paciente.id}`);
 }
 

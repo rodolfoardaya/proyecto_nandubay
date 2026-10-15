@@ -1,13 +1,13 @@
 "use client";
 import { BotonEnvio } from "@/components/ui/BotonEnvio";
 
-import { useState } from "react";
+import { useActionState, useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { CamposFicha } from "@/components/CamposFicha";
 import { FirmaPad } from "@/components/FirmaPad";
 import { AcuerdoTerapeuticoCampos, type ValoresAcuerdo } from "@/components/AcuerdoTerapeuticoCampos";
 import type { Seccion, DatosFicha } from "@/lib/ficha-fields";
-import { crearPaciente } from "@/app/panel/to/pacientes/actions";
+import { crearPaciente, type EstadoAlta } from "@/app/panel/to/pacientes/actions";
 
 type Props = {
   tipo: "nino" | "adulto";
@@ -109,8 +109,13 @@ export function NuevoPacienteForm({ tipo, secciones }: Props) {
     }
   }
 
+  // Si el alta no se puede hacer, el motivo vuelve acá y se muestra. Antes se
+  // lanzaba como excepción y en producción la pantalla se caía con un número
+  // de error, sin decir nunca qué había pasado.
+  const [estadoAlta, accionAlta] = useActionState<EstadoAlta, FormData>(crearPaciente, null);
+
   return (
-    <form action={crearPaciente} className="mt-6 grid gap-6">
+    <form action={accionAlta} className="mt-6 grid gap-6">
       <input type="hidden" name="tipo" value={tipo} />
 
       {/* Paso 1: método de carga */}
@@ -262,6 +267,12 @@ export function NuevoPacienteForm({ tipo, secciones }: Props) {
         />
         <FirmaPad name="firma" />
       </section>
+
+      {estadoAlta && !estadoAlta.ok && (
+        <p className="rounded-xl border border-orange/40 bg-orange/10 px-4 py-3 text-sm font-semibold text-orange">
+          {estadoAlta.mensaje}
+        </p>
+      )}
 
       <BotonEnvio enCurso="Dando de alta..." className="justify-self-start">
         {metodo === "pdf" ? "Aceptar datos y dar de alta" : "Guardar paciente"}
