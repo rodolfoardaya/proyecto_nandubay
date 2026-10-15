@@ -1,5 +1,6 @@
 import { requireRole } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
+import { hoyIso } from "@/lib/fecha";
 import { Card } from "@/components/ui/Card";
 
 export default async function PanelFamiliar() {
@@ -9,7 +10,7 @@ export default async function PanelFamiliar() {
   const { data: turnos } = await supabase
     .from("turnos")
     .select("id, fecha, hora, modalidad, estado, pacientes(nombre), tos(nombre)")
-    .gte("fecha", new Date().toISOString().slice(0, 10))
+    .gte("fecha", hoyIso())
     .order("fecha", { ascending: true })
     .order("hora", { ascending: true })
     .limit(5);

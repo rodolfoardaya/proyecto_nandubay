@@ -1,5 +1,6 @@
 import { requireRole } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
+import { fechaHoraLegible } from "@/lib/fecha";
 
 const ACCION_LABEL: Record<string, string> = {
   insert: "Alta",
@@ -44,7 +45,7 @@ export default async function Auditoria() {
             {registros?.map((r) => (
               <tr key={r.id}>
                 <td className="px-4 py-3 text-foreground/70">
-                  {new Date(r.created_at).toLocaleString("es-AR")}
+                  {fechaHoraLegible(r.created_at)}
                 </td>
                 <td className="px-4 py-3">
                   {r.usuario_nombre ?? "—"}

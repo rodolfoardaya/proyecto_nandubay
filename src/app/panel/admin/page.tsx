@@ -1,5 +1,6 @@
 import { requireRole } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
+import { hoyIso } from "@/lib/fecha";
 import { Card } from "@/components/ui/Card";
 import { confirmarTurno, cancelarTurno } from "../to/turnos/actions";
 
@@ -14,7 +15,7 @@ export default async function PanelAdmin() {
   const usuario = await requireRole("admin");
   const supabase = await createClient();
 
-  const hoy = new Date().toISOString().slice(0, 10);
+  const hoy = hoyIso();
 
   const { data: turnosHoy } = await supabase
     .from("turnos")

@@ -1,6 +1,7 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
+import { fechaHoraLegible } from "@/lib/fecha";
 
 // Tope de caracteres por campo. El formulario es público y anónimo: sin un
 // límite, cualquiera puede llenar la tabla con textos enormes.
@@ -50,7 +51,7 @@ async function avisarPorMail(datos: {
     <p><b>Mensaje:</b><br>${escapar(datos.mensaje).replace(/\n/g, "<br>") || "—"}</p>
     <hr>
     <p style="color:#666;font-size:12px">
-      Recibida el ${new Date().toLocaleString("es-AR")}.
+      Recibida el ${fechaHoraLegible(new Date())}.
       También quedó guardada en el sistema.
     </p>
   `;

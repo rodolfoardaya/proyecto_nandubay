@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { Image, StyleSheet, Text, View } from "@react-pdf/renderer";
 import { CONSULTORIO } from "@/lib/consultorio";
+import { fechaHoraLegible } from "@/lib/fecha";
 
 // Datos de la impresión que la Ley 26.529 exige poder rastrear: quién
 // imprimió la historia clínica y cuándo.
@@ -12,7 +13,7 @@ export type MetaImpresion = { usuario: string; fecha: string };
 export function metaImpresion(nombreUsuario: string): MetaImpresion {
   return {
     usuario: nombreUsuario,
-    fecha: new Date().toLocaleString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" }),
+    fecha: fechaHoraLegible(new Date()),
   };
 }
 

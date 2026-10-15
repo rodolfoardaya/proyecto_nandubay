@@ -1,6 +1,7 @@
 /* eslint-disable jsx-a11y/alt-text -- El <Image> de @react-pdf/renderer no
    acepta alt: no es una imagen del DOM, se dibuja dentro del PDF. */
 import { Document, Image, Page, Text, View } from "@react-pdf/renderer";
+import { fechaLegible } from "@/lib/fecha";
 import {
   CabeceraImpresion,
   Membrete,
@@ -81,7 +82,7 @@ function BloqueFirmas({
   firmaResponsable?: Buffer | null;
   fecha?: string | null;
 }) {
-  const fechaTexto = fecha ? new Date(fecha).toLocaleDateString("es-AR") : "";
+  const fechaTexto = fecha ? fechaLegible(fecha) : "";
 
   if (!esNino) {
     return (

@@ -1,4 +1,5 @@
 import { SubirDocumentoForm } from "@/components/SubirDocumentoForm";
+import { fechaLegible } from "@/lib/fecha";
 import { BotonQuitarDocumento } from "@/components/BotonQuitarDocumento";
 import { restaurarDocumentoPaciente } from "@/app/panel/to/pacientes/actions";
 
@@ -53,7 +54,7 @@ export function DocumentosPaciente({
                 <span className="text-xs italic text-foreground/60">{d.descripcion}</span>
               )}
               <span className="text-xs text-foreground/50">
-                {new Date(d.created_at).toLocaleDateString("es-AR")}
+                {fechaLegible(d.created_at)}
                 {pesoLegible(d.tamano_bytes) ? ` · ${pesoLegible(d.tamano_bytes)}` : ""}
               </span>
 
@@ -103,7 +104,7 @@ export function DocumentosPaciente({
               <li key={d.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2 text-sm">
                 <span className="font-semibold text-foreground/60">{d.titulo}</span>
                 <span className="text-xs text-foreground/40">
-                  {new Date(d.created_at).toLocaleDateString("es-AR")}
+                  {fechaLegible(d.created_at)}
                   {pesoLegible(d.tamano_bytes) ? ` · ${pesoLegible(d.tamano_bytes)}` : ""}
                 </span>
                 <form action={restaurarDocumentoPaciente} className="ml-auto">

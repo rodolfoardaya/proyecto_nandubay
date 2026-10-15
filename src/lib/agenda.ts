@@ -51,10 +51,10 @@ export function horariosDe(franja: Franja): string[] {
 
 // ── Fechas ─────────────────────────────────────────────────────────────────
 
-export function hoyIso() {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
+// La fecha de hoy sale de `fecha.ts`, que la calcula en la zona de Tucumán.
+// Antes se tomaba del reloj del servidor, que en el hosting corre en UTC: a
+// partir de las 21 la agenda abría directamente en el día siguiente.
+export { hoyIso } from "@/lib/fecha";
 
 // 0 = domingo, 1 = lunes ... 6 = sábado
 export function diaDeSemana(fechaIso: string) {

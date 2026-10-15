@@ -1,5 +1,6 @@
 import { requireRole } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
+import { fechaLegible } from "@/lib/fecha";
 import { TablaPacientes } from "@/components/TablaPacientes";
 import { reactivarPaciente } from "./actions";
 
@@ -64,7 +65,7 @@ export default async function ListaPacientesAdmin() {
                 <span className="font-bold text-green-dark">{p.nombre}</span>
                 {p.baja_at && (
                   <span className="text-xs text-foreground/50">
-                    baja del {new Date(p.baja_at).toLocaleDateString("es-AR")}
+                    baja del {fechaLegible(p.baja_at)}
                   </span>
                 )}
                 {p.baja_motivo && (
