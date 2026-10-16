@@ -135,6 +135,10 @@ export type Turno = {
   frecuencia: Frecuencia;
   fecha_fin: string | null;
   duracion_minutos: number;
+  // Qué clase de turno es y cuánto se cobra. Opcionales: los turnos
+  // cargados antes de la migración 0021 no los tienen.
+  clase?: string;
+  valor_sesion?: number | null;
 };
 
 // Una ocurrencia concreta: el turno tal como cae en una fecha puntual.
@@ -282,3 +286,26 @@ export function mapaDeOcupacion(ocurrencias: Ocurrencia[], horarios: string[]) {
 export function primerDiaHabil(fechaIso: string) {
   return diaDeSemana(fechaIso) === 0 ? sumarDias(fechaIso, 1) : fechaIso;
 }
+
+// Opciones del alta rápida de turnos desde la agenda. Van acá y no en el
+// archivo de acciones porque un "use server" sólo puede exportar funciones.
+export const CLASES_TURNO = [
+  { valor: "sesion", label: "Sesión" },
+  { valor: "evaluacion", label: "Evaluación" },
+  { valor: "reunion", label: "Reunión" },
+  { valor: "grupal", label: "Grupal" },
+] as const;
+
+export const DURACIONES = [
+  { valor: 30, label: "30 minutos" },
+  { valor: 40, label: "40 minutos" },
+  { valor: 45, label: "45 minutos" },
+  { valor: 60, label: "1 hora" },
+  { valor: 90, label: "1 hora 30 minutos" },
+] as const;
+
+// Valor que toma el desplegable de pacientes cuando se elige "Otro". No es
+// un identificador válido, así que no puede confundirse con un paciente real.
+// Lo comparten el formulario y la acción: si cada uno usara su propio texto,
+// el servidor recibiría "otro" como si fuera un id y el alta fallaría.
+export const PACIENTE_OTRO = "__otro__";

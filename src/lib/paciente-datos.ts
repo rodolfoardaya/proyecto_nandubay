@@ -83,3 +83,15 @@ function textoEdad(anios: number, meses: number): string {
   if (meses === 0) return enAnios;
   return `${enAnios} y ${enMeses}`;
 }
+
+// Estados posibles del tratamiento. Viven en un módulo común y no en el
+// archivo de acciones porque un "use server" sólo puede exportar funciones.
+//
+// "Baja" no borra nada: saca al paciente de los listados normales y su
+// historia clínica queda intacta, como exige la Ley 26.529.
+export const ESTADOS_PACIENTE = [
+  { valor: "activo", label: "Activo", ayuda: "Se dio de alta y está en tratamiento." },
+  { valor: "en_evaluacion", label: "En evaluación", ayuda: "Concurre con frecuencia a las sesiones." },
+  { valor: "alta", label: "Alta", ayuda: "Logró el objetivo del tratamiento." },
+  { valor: "baja", label: "Baja", ayuda: "No continúa. Deja de aparecer en los listados." },
+] as const;

@@ -10,7 +10,7 @@ import { SECCIONES_NINOS, SECCIONES_ADULTOS, CAMPOS_ACUERDO } from "@/lib/ficha-
 import { parseDatosFicha, parseObservaciones } from "@/lib/observaciones";
 import { registrarAuditoria } from "@/lib/auditoria";
 import { MAXIMO_ARCHIVO_MB, excedeElMaximo, mensajeArchivoGrande } from "@/lib/archivos";
-import { dniDeCuil, normalizarCuil } from "@/lib/paciente-datos";
+import { dniDeCuil, normalizarCuil, ESTADOS_PACIENTE } from "@/lib/paciente-datos";
 
 // Sube una firma manuscrita (dataURL PNG del FirmaPad) al bucket privado
 // "documentos" y devuelve la ruta guardada, o null si no se firmó nada.
@@ -304,10 +304,15 @@ export async function actualizarDatosAdministrativos(formData: FormData) {
   const paciente_id = String(formData.get("paciente_id"));
   const cuilCrudo = String(formData.get("cuil") || "").trim();
 
-  // La obra social se escribe siempre: dejarla vacía es la forma de borrarla
-  // cuando una familia deja de tenerla.
+  // La obra social y los datos del tutor se escriben siempre: dejarlos vacíos
+  // es la forma de borrarlos cuando una familia deja de tener obra social o
+  // cambia quién acompaña al paciente.
   const cambios: Record<string, string | null> = {
     obra_social: String(formData.get("obra_social") || "").trim() || null,
+    tutor_nombre: String(formData.get("tutor_nombre") || "").trim().toUpperCase() || null,
+    tutor_dni: String(formData.get("tutor_dni") || "").replace(/\D/g, "") || null,
+    tutor_telefono: String(formData.get("tutor_telefono") || "").trim() || null,
+    tutor_email: String(formData.get("tutor_email") || "").trim().toLowerCase() || null,
   };
 
   // El CUIL, en cambio, sólo se toca si escribieron uno. Vacío significa "no
@@ -387,11 +392,18 @@ export async function agregarNotaEvolucion(formData: FormData) {
   const objetivos_trabajados = String(formData.get("objetivos_trabajados") || "");
   const firma_url = await subirFirma(supabase, String(formData.get("firma") || ""), "evolucion");
 
+  // El avance del objetivo llega como texto del control deslizante.
+  const crudo = Number(formData.get("progreso"));
+  const progreso = Number.isFinite(crudo)
+    ? Math.min(100, Math.max(0, Math.round(crudo)))
+    : null;
+
   const { error } = await supabase.from("notas_evolucion").insert({
     paciente_id,
     to_id: paciente?.to_asignada_id,
     nota,
     objetivos_trabajados,
+    progreso,
     firma_url,
   });
 
@@ -613,4 +625,32 @@ export async function restaurarDocumentoPaciente(formData: FormData) {
 
   await registrarAuditoria("restaurado_documento", `documento ${documento_id}`);
   refrescarDocumentos(usuario.rol, paciente_id);
+}
+
+// ── Estado del paciente ────────────────────────────────────────────────────
+// Reemplaza al alta/baja de antes, que no distinguía entre quien terminó el
+// tratamiento y quien lo dejó. "Baja" no borra nada: saca al paciente de los
+// listados normales, y su historia clínica queda intacta.
+export async function cambiarEstadoPaciente(formData: FormData) {
+  const usuario = await requireRole("to", "admin");
+  const supabase = await createClient();
+
+  const paciente_id = String(formData.get("paciente_id"));
+  const estado = String(formData.get("estado") || "activo");
+  const motivo = String(formData.get("baja_motivo") || "").trim() || null;
+
+  if (!ESTADOS_PACIENTE.some((e) => e.valor === estado)) return;
+
+  // `activo` y `baja_at` los mantiene al día el trigger de la migración 0021,
+  // así que acá sólo se escribe el estado y, si corresponde, el motivo.
+  const { error } = await supabase
+    .from("pacientes")
+    .update(estado === "baja" ? { estado, baja_motivo: motivo } : { estado })
+    .eq("id", paciente_id);
+
+  if (error) throw new Error(error.message);
+
+  await registrarAuditoria("estado_paciente", `${paciente_id} → ${estado}`);
+  revalidatePath(`/panel/${usuario.rol}/pacientes/${paciente_id}`);
+  revalidatePath(`/panel/${usuario.rol}/pacientes`);
 }

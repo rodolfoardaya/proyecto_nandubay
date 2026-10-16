@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { requireRole } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { registrarAuditoria } from "@/lib/auditoria";
+import { PACIENTE_OTRO } from "@/lib/agenda";
 import { crearEventoCalendar, eliminarEventoCalendar, actualizarEventoCalendar } from "@/lib/google-calendar";
 
 export async function crearTurno(formData: FormData) {
@@ -168,4 +169,115 @@ export async function actualizarTurno(formData: FormData) {
 
   await registrarAuditoria("edicion_turno", `${turno_id} — ${fecha} ${hora}, ${duracion_minutos} min`);
   revalidatePath(`/panel/${usuario.rol}/agenda`);
+}
+
+// ── Alta rápida desde la agenda ────────────────────────────────────────────
+// Los botones + TURNO, + EVALUACIÓN y + REUNIÓN usan esta acción. A
+// diferencia del alta desde la ficha del paciente, acá se puede elegir la
+// clase de turno, cargar el valor de la sesión y anotar a alguien que no está
+// en la base —una reunión con otro profesional, por ejemplo—.
+export type EstadoTurno = { ok: boolean; mensaje: string } | null;
+
+export async function crearTurnoDesdeAgenda(
+  _previo: EstadoTurno,
+  formData: FormData
+): Promise<EstadoTurno> {
+  const usuario = await requireRole("to", "admin");
+  const supabase = await createClient();
+
+  const fecha = String(formData.get("fecha") || "");
+  const hora = String(formData.get("hora") || "");
+  if (!fecha || !hora) return { ok: false, mensaje: "Cargá la fecha y la hora del turno." };
+
+  // El paciente puede venir de la lista o escribirse a mano con la opción
+  // "Otro". Tiene que haber uno de los dos.
+  const elegido = String(formData.get("paciente_id") || "");
+  const paciente_id = elegido && elegido !== PACIENTE_OTRO ? elegido : null;
+  const paciente_libre = String(formData.get("paciente_libre") || "").trim().toUpperCase() || null;
+  if (!paciente_id && !paciente_libre) {
+    return { ok: false, mensaje: "Elegí un paciente de la lista o escribí un nombre en «Otro»." };
+  }
+
+  const clase = String(formData.get("clase") || "sesion");
+  const duracion_minutos = Math.max(5, Math.round(Number(formData.get("duracion_minutos") || 45)));
+  const frecuencia = String(formData.get("frecuencia") || "unica");
+  const fecha_fin = frecuencia === "semanal" ? fecha.slice(0, 4) + "-12-31" : null;
+
+  const valorCrudo = String(formData.get("valor_sesion") || "").trim();
+  const valor_sesion = valorCrudo ? Number(valorCrudo) : null;
+  if (valor_sesion !== null && !Number.isFinite(valor_sesion)) {
+    return { ok: false, mensaje: "El valor de la sesión tiene que ser un número." };
+  }
+
+  // La TO a cargo sale del paciente cuando lo hay; si es alguien de afuera,
+  // el turno queda a nombre de quien lo carga.
+  let to_id: string | null = null;
+  let registro: string | null = null;
+  if (paciente_id) {
+    const { data: p } = await supabase
+      .from("pacientes")
+      .select("to_asignada_id, numero_registro")
+      .eq("id", paciente_id)
+      .single();
+    to_id = p?.to_asignada_id ?? null;
+    registro = p?.numero_registro ?? null;
+  }
+  if (!to_id) {
+    const { data: to } = await supabase
+      .from("tos")
+      .select("id")
+      .eq("usuario_id", usuario.id)
+      .maybeSingle();
+    to_id = to?.id ?? null;
+  }
+  if (!to_id) {
+    return { ok: false, mensaje: "No se pudo determinar la TO a cargo del turno." };
+  }
+
+  const { data: turno, error } = await supabase
+    .from("turnos")
+    .insert({
+      paciente_id,
+      paciente_libre,
+      to_id,
+      fecha,
+      hora,
+      clase,
+      valor_sesion,
+      duracion_minutos,
+      frecuencia,
+      fecha_fin,
+      tipo: frecuencia === "unica" ? "suelto" : "fijo",
+      modalidad: String(formData.get("modalidad") || "presencial"),
+      estado: "confirmado",
+    })
+    .select("id")
+    .single();
+
+  if (error || !turno) {
+    return { ok: false, mensaje: error?.message ?? "No se pudo crear el turno." };
+  }
+
+  // Al calendario de Google va el número de registro, nunca el nombre del
+  // paciente. Para alguien de afuera de la base va lo que se escribió: no es
+  // un paciente del consultorio.
+  const { data: toFila } = await supabase.from("tos").select("nombre").eq("id", to_id).maybeSingle();
+  const googleEventId = await crearEventoCalendar({
+    fecha,
+    hora,
+    duracionMinutos: duracion_minutos,
+    frecuencia: frecuencia as "unica" | "semanal",
+    hasta: fecha_fin,
+    pacienteRegistro: registro ?? paciente_libre ?? "Turno",
+    modalidad: String(formData.get("modalidad") || "presencial") as "presencial" | "online",
+    toNombre: toFila?.nombre ?? "TO",
+  });
+  if (googleEventId) {
+    await supabase.from("turnos").update({ google_event_id: googleEventId }).eq("id", turno.id);
+  }
+
+  await registrarAuditoria("alta_turno", `${registro ?? paciente_libre} — ${fecha} ${hora} (${clase})`);
+  revalidatePath(`/panel/${usuario.rol}/agenda`);
+
+  return { ok: true, mensaje: `Turno creado para el ${fecha} a las ${hora}.` };
 }

@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { requireRole } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { Card } from "@/components/ui/Card";
@@ -84,6 +85,22 @@ export default async function PanelTo() {
 
   const turnosHoy = turnosSemana.filter((t) => t.fechaOcurrencia === hoy);
 
+  // Cuántas tareas hay en cada estado. Se piden sólo los totales, sin traer
+  // las filas: el detalle vive en su propia pantalla.
+  const contarTareas = async (estado: string) =>
+    (
+      await supabase
+        .from("tareas")
+        .select("id", { count: "exact", head: true })
+        .eq("estado", estado)
+    ).count ?? 0;
+
+  const [tareasPendientes, tareasEnProgreso, tareasCompletadas] = await Promise.all([
+    contarTareas("pendiente"),
+    contarTareas("en_progreso"),
+    contarTareas("completada"),
+  ]);
+
   return (
     <div>
       <h1 className="text-2xl font-extrabold text-green-dark">
@@ -106,6 +123,26 @@ export default async function PanelTo() {
           </p>
         </Card>
       </div>
+
+      {/* Resumen de tareas: lo que falta hacer, de un vistazo. */}
+      <div className="mt-4 grid gap-4 sm:grid-cols-3">
+        {[
+          { label: "Tareas pendientes", valor: tareasPendientes, color: "text-orange" },
+          { label: "En progreso", valor: tareasEnProgreso, color: "text-blue-mid" },
+          { label: "Completadas", valor: tareasCompletadas, color: "text-green-mid" },
+        ].map((t) => (
+          <Card key={t.label}>
+            <p className="text-sm font-bold text-foreground/60">{t.label}</p>
+            <p className={`mt-1 text-3xl font-extrabold ${t.color}`}>{t.valor}</p>
+          </Card>
+        ))}
+      </div>
+      <Link
+        href={`/panel/${usuario.rol}/tareas`}
+        className="mt-2 inline-block text-xs font-bold text-blue-mid hover:underline"
+      >
+        Ver todas las tareas →
+      </Link>
 
       <h2 className="mt-8 font-bold text-green-dark">
         Esta semana — del {formatoCorto(desde)} al {formatoCorto(hasta)}

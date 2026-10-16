@@ -7,7 +7,18 @@ import { calcularDatosFaltantes } from "@/lib/datos-faltantes";
 import { SECCIONES_PACIENTE } from "@/lib/paciente-vista";
 import { BotonEnvio } from "@/components/ui/BotonEnvio";
 import { actualizarDatosPaciente } from "@/app/panel/admin/pacientes/actions";
-import { actualizarDatosAdministrativos } from "@/app/panel/to/pacientes/actions";
+import {
+  actualizarDatosAdministrativos,
+  cambiarEstadoPaciente,
+} from "@/app/panel/to/pacientes/actions";
+import { ESTADOS_PACIENTE } from "@/lib/paciente-datos";
+
+const ESTADO_COLOR: Record<string, string> = {
+  activo: "bg-green-light/50 text-green-dark",
+  en_evaluacion: "bg-blue-light/30 text-blue-mid",
+  alta: "bg-yellow-main/30 text-[#8a6400]",
+  baja: "bg-black/10 text-foreground/60",
+};
 import { documentoVisible, edadDe } from "@/lib/paciente-datos";
 
 // Portada del paciente: sus datos y el acceso a cada parte de la historia.
@@ -22,7 +33,9 @@ export default async function PortadaPaciente({
 
   const { data: paciente } = await supabase
     .from("pacientes")
-    .select("id, nombre, numero_registro, tipo, fecha_nacimiento, dni, cuil, obra_social, tos(nombre)")
+    .select(
+      "id, nombre, numero_registro, tipo, fecha_nacimiento, dni, cuil, obra_social, estado, baja_motivo, tutor_nombre, tutor_dni, tutor_telefono, tutor_email, tos(nombre)"
+    )
     .eq("id", id)
     .maybeSingle();
 
@@ -71,7 +84,56 @@ export default async function PortadaPaciente({
           {dato("Tipo de ficha", paciente.tipo)}
           {/* @ts-expect-error relación anidada */}
           {dato("TO a cargo", paciente.tos?.nombre)}
+          {dato("Tutor", paciente.tutor_nombre)}
+          {dato("DNI del tutor", paciente.tutor_dni)}
+          {dato("Teléfono / WhatsApp", paciente.tutor_telefono)}
+          {dato("Correo", paciente.tutor_email)}
         </dl>
+
+        {/* Estado del tratamiento. Dar de baja no borra nada: saca al
+            paciente de los listados y su historia clínica queda intacta. */}
+        <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-black/5 pt-4">
+          <span className="text-xs font-semibold uppercase text-foreground/50">Estado</span>
+          <span
+            className={`rounded-full px-3 py-1 text-xs font-bold ${
+              ESTADO_COLOR[paciente.estado ?? "activo"] ?? ESTADO_COLOR.activo
+            }`}
+          >
+            {ESTADOS_PACIENTE.find((e) => e.valor === (paciente.estado ?? "activo"))?.label}
+          </span>
+          {paciente.estado === "baja" && paciente.baja_motivo && (
+            <span className="text-xs italic text-foreground/60">{paciente.baja_motivo}</span>
+          )}
+
+          <details className="ml-auto">
+            <summary className="cursor-pointer rounded-full border border-black/10 px-3 py-1.5 text-xs font-semibold text-blue-mid hover:bg-blue-light/20">
+              Cambiar estado
+            </summary>
+            <form action={cambiarEstadoPaciente} className="mt-3 grid max-w-sm gap-2">
+              <input type="hidden" name="paciente_id" value={id} />
+              <select
+                name="estado"
+                defaultValue={paciente.estado ?? "activo"}
+                className="rounded-xl border border-black/10 px-3 py-2 text-sm outline-blue-mid"
+              >
+                {ESTADOS_PACIENTE.map((e) => (
+                  <option key={e.valor} value={e.valor}>
+                    {e.label} — {e.ayuda}
+                  </option>
+                ))}
+              </select>
+              <input
+                name="baja_motivo"
+                defaultValue={paciente.baja_motivo ?? ""}
+                placeholder="Motivo (sólo si es baja)"
+                className="rounded-xl border border-black/10 px-3 py-2 text-sm outline-blue-mid"
+              />
+              <BotonEnvio variant="secondary" className="justify-self-start">
+                Guardar estado
+              </BotonEnvio>
+            </form>
+          </details>
+        </div>
 
         {/* Corregir lo que se cargó mal en el alta. Sólo el admin: para la TO
             estos datos siguen siendo de lectura. El número de registro no
@@ -159,10 +221,30 @@ export default async function PortadaPaciente({
         {usuario.rol === "to" && (
           <details className="mt-4">
             <summary className="cursor-pointer text-xs font-semibold text-blue-mid">
-              Cargar o corregir CUIL y obra social
+              Cargar o corregir CUIL, obra social y datos del tutor
             </summary>
             <form action={actualizarDatosAdministrativos} className="mt-3 grid max-w-sm gap-2">
               <input type="hidden" name="paciente_id" value={id} />
+
+              {/* Datos de quien acompaña al paciente: a quién se llama, a
+                  quién se le factura y quién firma. */}
+              {[
+                { name: "tutor_nombre", label: "Tutor (apellido y nombre)", valor: paciente.tutor_nombre, tipo: "text", ph: "APELLIDO Y NOMBRE" },
+                { name: "tutor_dni", label: "DNI del tutor", valor: paciente.tutor_dni, tipo: "text", ph: "Solo números" },
+                { name: "tutor_telefono", label: "Teléfono / WhatsApp", valor: paciente.tutor_telefono, tipo: "tel", ph: "3815821197" },
+                { name: "tutor_email", label: "Correo", valor: paciente.tutor_email, tipo: "email", ph: "correo@ejemplo.com" },
+              ].map((c) => (
+                <label key={c.name} className="text-xs font-semibold text-foreground/70">
+                  {c.label}
+                  <input
+                    name={c.name}
+                    type={c.tipo}
+                    defaultValue={c.valor ?? ""}
+                    placeholder={c.ph}
+                    className="mt-1 w-full rounded-xl border border-black/10 px-3 py-2 text-sm outline-blue-mid"
+                  />
+                </label>
+              ))}
               <label className="text-xs font-semibold text-foreground/70">
                 CUIL
                 <input

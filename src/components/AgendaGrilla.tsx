@@ -121,6 +121,17 @@ export function AgendaGrilla({
                         <details key={turno.id} className="group">
                           <summary className="cursor-pointer list-none font-semibold text-green-dark">
                             {turno.paciente}
+                            {/* La clase sólo se escribe cuando no es una
+                                sesión: es lo que se sale de lo habitual. */}
+                            {turno.clase && turno.clase !== "sesion" && (
+                              <span className="ml-1 rounded-full bg-blue-light/40 px-1.5 text-[9px] font-bold uppercase text-blue-mid">
+                                {turno.clase === "evaluacion"
+                                  ? "eval"
+                                  : turno.clase === "reunion"
+                                    ? "reunión"
+                                    : "grupal"}
+                              </span>
+                            )}
                             {turno.frecuencia !== "unica" && (
                               <span className="ml-1 font-normal text-foreground/40">
                                 ↻

@@ -5,6 +5,8 @@ import { FirmaPad } from "@/components/FirmaPad";
 import { BotonEnvio } from "@/components/ui/BotonEnvio";
 import { archivoUrl } from "@/lib/paciente-vista";
 import { agregarNotaEvolucion } from "@/app/panel/to/pacientes/actions";
+import { BarraProgreso } from "@/components/BarraProgreso";
+import { GraficoEvolucion } from "@/components/GraficoEvolucion";
 
 export default async function EvolucionDelPaciente({
   params,
@@ -17,7 +19,7 @@ export default async function EvolucionDelPaciente({
 
   const { data: evolucion } = await supabase
     .from("notas_evolucion")
-    .select("id, fecha, nota, objetivos_trabajados, firma_url")
+    .select("id, fecha, nota, objetivos_trabajados, progreso, firma_url")
     .eq("paciente_id", id)
     .order("fecha", { ascending: false });
 
@@ -27,6 +29,13 @@ export default async function EvolucionDelPaciente({
       firmaSignedUrl: await archivoUrl(supabase, n.firma_url),
     }))
   );
+
+  // Mientras se siga trabajando el mismo objetivo, la barra arranca en el
+  // avance de la última nota: se actualiza, no se estima de nuevo. El
+  // objetivo también se repite, que es lo habitual sesión a sesión.
+  const ultima = (evolucion ?? [])[0];
+  const ultimoObjetivo = ultima?.objetivos_trabajados ?? null;
+  const ultimoProgreso = typeof ultima?.progreso === "number" ? ultima.progreso : 0;
 
   const soloLectura = usuario.rol === "direccion";
 
@@ -42,14 +51,25 @@ export default async function EvolucionDelPaciente({
         {/* Imprime datos personales + evolución, nada más. La historia
             completa —con ficha de inicio y acuerdo— sigue estando en la
             portada del paciente. */}
-        <a
-          href={`/api/imprimir/evolucion?paciente_id=${id}`}
-          target="_blank"
-          rel="noreferrer"
-          className="text-sm font-bold text-blue-mid hover:underline"
-        >
-          Imprimir evolución ↗
-        </a>
+        <div className="flex items-center gap-4">
+          <a
+            href={`/api/imprimir/evolucion?paciente_id=${id}`}
+            target="_blank"
+            rel="noreferrer"
+            className="text-sm font-bold text-blue-mid hover:underline"
+          >
+            Imprimir evolución ↗
+          </a>
+          <GraficoEvolucion
+            puntos={(evolucion ?? [])
+              .filter((n) => typeof n.progreso === "number")
+              .map((n) => ({
+                fecha: n.fecha,
+                progreso: n.progreso as number,
+                objetivo: n.objetivos_trabajados,
+              }))}
+          />
+        </div>
       </div>
 
       {!soloLectura && (
@@ -68,9 +88,11 @@ export default async function EvolucionDelPaciente({
           />
           <input
             name="objetivos_trabajados"
+            defaultValue={ultimoObjetivo ?? ""}
             placeholder="Objetivos trabajados"
             className="rounded-xl border border-black/10 px-4 py-3 outline-blue-mid"
           />
+          <BarraProgreso name="progreso" inicial={ultimoProgreso} objetivoAnterior={ultimoObjetivo} />
           <FirmaPad name="firma" />
           <BotonEnvio variant="secondary" enCurso="Agregando..." className="justify-self-start">
             Agregar nota
@@ -85,6 +107,17 @@ export default async function EvolucionDelPaciente({
             <p className="mt-1 whitespace-pre-wrap text-sm">{n.nota}</p>
             {n.objetivos_trabajados && (
               <p className="mt-1 text-sm text-blue-mid">Objetivos: {n.objetivos_trabajados}</p>
+            )}
+            {typeof n.progreso === "number" && (
+              <div className="mt-2 max-w-xs">
+                <div className="flex justify-between text-[11px] font-semibold text-foreground/50">
+                  <span>Avance del objetivo</span>
+                  <span className="text-green-dark">{n.progreso}%</span>
+                </div>
+                <div className="mt-1 h-2 w-full rounded-full bg-black/10">
+                  <div className="h-2 rounded-full bg-green-mid" style={{ width: `${n.progreso}%` }} />
+                </div>
+              </div>
             )}
             {n.firmaSignedUrl && (
               // eslint-disable-next-line @next/next/no-img-element

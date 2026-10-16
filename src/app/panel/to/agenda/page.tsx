@@ -2,17 +2,20 @@ import Link from "next/link";
 import { requireRole } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { AgendaGrilla } from "@/components/AgendaGrilla";
+import { NuevoTurno } from "@/components/NuevoTurno";
 import { FormularioBloqueo } from "@/components/FormularioBloqueo";
 import { borrarBloqueo, reactivarFecha } from "./actions";
 import {
   FRANJAS,
   fechasDe,
+  formatoCorto,
   formatoLargo,
   hoyIso,
   ocurrenciasEn,
   primerDiaHabil,
   nombreDelMes,
   semanaDe,
+  semanasDelMes,
   sumarDias,
   type Bloqueo,
   type Franja,
@@ -62,7 +65,7 @@ export default async function Agenda({ searchParams }: { searchParams: Params })
   // meses sigue cayendo esta semana, y filtrar por fecha lo dejaría afuera.
   const { data: turnosRaw } = await supabase
     .from("turnos")
-    .select("id, fecha, hora, estado, modalidad, frecuencia, fecha_fin, duracion_minutos, paciente_id, pacientes(nombre)")
+    .select("id, fecha, hora, estado, modalidad, frecuencia, fecha_fin, duracion_minutos, clase, valor_sesion, paciente_libre, paciente_id, pacientes(nombre, numero_registro)")
     .eq("to_id", toId)
     .lte("fecha", hasta);
 
@@ -76,8 +79,10 @@ export default async function Agenda({ searchParams }: { searchParams: Params })
     fecha_fin: t.fecha_fin,
     duracion_minutos: t.duracion_minutos ?? 45,
     paciente_id: t.paciente_id,
+    clase: t.clase ?? "sesion",
+    valor_sesion: t.valor_sesion,
     // @ts-expect-error relación anidada
-    paciente: t.pacientes?.nombre ?? "—",
+    paciente: t.pacientes?.nombre ?? t.paciente_libre ?? "—",
   }));
 
   const { data: excepciones } = await supabase
@@ -112,6 +117,21 @@ export default async function Agenda({ searchParams }: { searchParams: Params })
     .lte("fecha_desde", hasta)
     .gte("fecha_hasta", desde)
     .order("fecha_desde");
+
+  // En el mes se dibuja una grilla por semana; en día y semana, una sola.
+  const semanasVisibles = vista === "mes" ? semanasDelMes(fecha) : [fechas];
+
+  // Pacientes que se ofrecen en el alta rápida de turnos: los que no están
+  // dados de baja.
+  const { data: pacientesActivos } = await supabase
+    .from("pacientes")
+    .select("id, nombre, numero_registro")
+    .neq("estado", "baja")
+    .order("nombre");
+  const opcionesPaciente = (pacientesActivos ?? []).map((x) => ({
+    id: x.id,
+    nombre: `${x.numero_registro} — ${x.nombre}`,
+  }));
 
   const bloqueos: Bloqueo[] = bloqueosRaw ?? [];
   const base = `/panel/${usuario.rol}`;
@@ -198,14 +218,52 @@ export default async function Agenda({ searchParams }: { searchParams: Params })
 
       <p className="mt-3 font-bold capitalize text-green-dark">{titulo}</p>
 
-      <AgendaGrilla
-        fechas={fechas}
-        franja={franja}
-        turnos={turnos}
-        bloqueos={bloqueos}
-        base={base}
-        seguimientos={seguimientos}
-      />
+      {/* El calendario a la izquierda y los accesos rápidos a la derecha.
+          En el mes, las semanas se muestran una debajo de otra: así las
+          columnas siguen siendo lunes a sábado y se puede leer. */}
+      <div className="mt-2 flex flex-col gap-4 lg:flex-row lg:items-start">
+        <div className="min-w-0 flex-1">
+          {semanasVisibles.map((semana, i) => (
+            <div key={semana[0]}>
+              {vista === "mes" && (
+                <p className="mt-4 text-xs font-bold uppercase text-foreground/40">
+                  Semana {i + 1} — del {formatoCorto(semana[0])} al{" "}
+                  {formatoCorto(semana[semana.length - 1])}
+                </p>
+              )}
+              <AgendaGrilla
+                fechas={semana}
+                franja={franja}
+                turnos={turnos}
+                bloqueos={bloqueos}
+                base={base}
+                seguimientos={seguimientos}
+              />
+            </div>
+          ))}
+        </div>
+
+        <aside className="grid w-full shrink-0 gap-2 lg:w-52">
+          <NuevoTurno
+            pacientes={opcionesPaciente}
+            claseInicial="sesion"
+            etiqueta="+ Turno"
+            fechaSugerida={fecha}
+          />
+          <NuevoTurno
+            pacientes={opcionesPaciente}
+            claseInicial="evaluacion"
+            etiqueta="+ Evaluación"
+            fechaSugerida={fecha}
+          />
+          <NuevoTurno
+            pacientes={opcionesPaciente}
+            claseInicial="reunion"
+            etiqueta="+ Reunión"
+            fechaSugerida={fecha}
+          />
+        </aside>
+      </div>
 
       <div className="mt-2 flex flex-wrap items-center gap-3">
         <p className="text-xs text-foreground/50">

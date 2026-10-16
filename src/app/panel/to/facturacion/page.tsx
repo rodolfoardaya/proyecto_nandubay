@@ -1,6 +1,9 @@
 import { requireRole } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { Card } from "@/components/ui/Card";
+import { VenderPaquete } from "@/components/VenderPaquete";
+import { cambiarPagoPaquete } from "./paquetes-actions";
+import { fechaLegible } from "@/lib/fecha";
 import { FacturaUploadForm } from "@/components/FacturaUploadForm";
 import { actualizarEstadoCobro } from "./actions";
 
@@ -22,14 +25,19 @@ export default async function Facturacion() {
 
   const { data: pacientes } = await supabase
     .from("pacientes")
-    .select("id, nombre")
-    .eq("activo", true)
+    .select("id, nombre, numero_registro")
+    .neq("estado", "baja")
     .order("nombre");
 
   const { data: facturas } = await supabase
     .from("facturas")
     .select("id, fecha_facturacion, monto, fecha_vencimiento_estimada, estado_cobro, pacientes(nombre)")
     .order("fecha_facturacion", { ascending: false });
+
+  const { data: paquetes } = await supabase
+    .from("paquetes_sesiones")
+    .select("id, cantidad_sesiones, precio_total, fecha_inicio, fecha_fin, pagado, nota, created_at, pacientes(nombre, numero_registro)")
+    .order("created_at", { ascending: false });
 
   const stats = { pagada: 0, a_cobrar: 0, vencida: 0 };
   for (const f of facturas ?? []) {
@@ -38,7 +46,15 @@ export default async function Facturacion() {
 
   return (
     <div className="max-w-3xl">
-      <h1 className="text-2xl font-extrabold text-green-dark">Facturación</h1>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-2xl font-extrabold text-green-dark">Facturación</h1>
+        <VenderPaquete
+          pacientes={(pacientes ?? []).map((p) => ({
+            id: p.id,
+            nombre: `${p.numero_registro} — ${p.nombre}`,
+          }))}
+        />
+      </div>
 
       <div className="mt-6 grid grid-cols-3 gap-4">
         <Card>
@@ -97,6 +113,50 @@ export default async function Facturacion() {
         ))}
         {!facturas?.length && (
           <p className="text-sm text-foreground/60">Sin facturas cargadas.</p>
+        )}
+      </div>
+
+      {/* Paquetes de sesiones vendidos. Se registran y se cobran; todavía no
+          descuentan sesiones a medida que se dan los turnos. */}
+      <h2 className="mt-8 font-bold text-green-dark">Paquetes de sesiones</h2>
+      <div className="mt-3 grid gap-2">
+        {(paquetes ?? []).map((q) => (
+          <Card key={q.id} className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <span className="font-semibold text-green-dark">
+              {/* @ts-expect-error relación anidada */}
+              {q.pacientes?.numero_registro} — {/* @ts-expect-error relación anidada */}
+              {q.pacientes?.nombre}
+            </span>
+            <span className="text-sm text-foreground/70">
+              {q.cantidad_sesiones} sesiones · ${Number(q.precio_total).toLocaleString("es-AR")}
+            </span>
+            {q.fecha_inicio && (
+              <span className="text-xs text-foreground/50">
+                del {fechaLegible(q.fecha_inicio + "T12:00:00")}
+                {q.fecha_fin ? ` al ${fechaLegible(q.fecha_fin + "T12:00:00")}` : ""}
+              </span>
+            )}
+            {q.nota && <span className="text-xs italic text-foreground/50">{q.nota}</span>}
+            <span className="ml-auto flex items-center gap-2">
+              <span
+                className={`rounded-full px-3 py-1 text-xs font-bold ${
+                  q.pagado ? "bg-green-light/50 text-green-dark" : "bg-orange/20 text-orange"
+                }`}
+              >
+                {q.pagado ? "Pagado" : "Adeudado"}
+              </span>
+              <form action={cambiarPagoPaquete}>
+                <input type="hidden" name="paquete_id" value={q.id} />
+                <input type="hidden" name="pagado" value={q.pagado ? "no" : "si"} />
+                <button className="text-xs font-bold text-blue-mid hover:underline">
+                  Marcar como {q.pagado ? "adeudado" : "pagado"}
+                </button>
+              </form>
+            </span>
+          </Card>
+        ))}
+        {!paquetes?.length && (
+          <p className="text-sm text-foreground/60">Todavía no se vendió ningún paquete.</p>
         )}
       </div>
     </div>
