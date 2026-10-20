@@ -14,6 +14,7 @@ import {
   mapaDeOcupacion,
   type Bloqueo,
   type Franja,
+  type HorarioTO,
   type Ocurrencia,
 } from "@/lib/agenda";
 
@@ -28,6 +29,7 @@ export function AgendaGrilla({
   bloqueos,
   base,
   seguimientos,
+  horario,
 }: {
   fechas: string[];
   franja: Franja;
@@ -35,16 +37,17 @@ export function AgendaGrilla({
   bloqueos: Bloqueo[];
   base: string;
   seguimientos: Map<string, Seguimiento>;
+  // Horario de atención de la TO: define desde y hasta qué hora se dibuja.
+  horario?: HorarioTO;
 }) {
-  const horarios = horariosDe(franja);
+  const horarios = horariosDe(franja, horario);
   const { inicio, tapada } = mapaDeOcupacion(turnos, horarios);
-  const visibles = fechas.filter((f) => seAtiende(f, franja));
+  const visibles = fechas.filter((f) => seAtiende(f));
 
   if (visibles.length === 0) {
     return (
       <p className="mt-6 text-sm text-foreground/60">
-        No se atiende en ese día y franja. Los sábados sólo hay turnos por la
-        mañana, y los domingos no se atiende.
+        Los domingos no se atiende.
       </p>
     );
   }

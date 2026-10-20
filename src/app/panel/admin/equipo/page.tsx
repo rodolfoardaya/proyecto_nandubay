@@ -4,7 +4,15 @@ import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { ResetearClaveButton } from "@/components/ResetearClaveButton";
 import { BotonConfirmar } from "@/components/ui/BotonConfirmar";
-import { crearTo, actualizarTo, cambiarEstadoTo, borrarTo, reasignarPacientes, subirFotoTo } from "./actions";
+import {
+  crearTo,
+  actualizarTo,
+  actualizarHorarioTo,
+  cambiarEstadoTo,
+  borrarTo,
+  reasignarPacientes,
+  subirFotoTo,
+} from "./actions";
 
 function iniciales(nombre: string) {
   return nombre
@@ -35,7 +43,7 @@ export default async function EquipoTo({
 
   const { data: tos } = await supabase
     .from("tos")
-    .select("id, nombre, dni, matricula, letra, frase_perfil, activo, usuario_id, foto_url, usuarios(usuario, email)")
+    .select("id, nombre, dni, matricula, letra, frase_perfil, activo, usuario_id, foto_url, manana_desde, manana_hasta, tarde_desde, tarde_hasta, usuarios(usuario, email)")
     .order("nombre");
 
   const tosConFoto = await Promise.all(
@@ -169,6 +177,51 @@ export default async function EquipoTo({
                 />
                 <Button type="submit" variant="secondary" className="justify-self-start">
                   Guardar cambios
+                </Button>
+              </form>
+            </details>
+
+            {/* Horario de atención: define de qué hora a qué hora se dibuja
+                la agenda de esta TO. */}
+            <details className="mt-2">
+              <summary className="cursor-pointer text-xs font-semibold text-blue-mid">
+                Horario de atención
+                <span className="ml-2 font-normal text-foreground/50">
+                  mañana {String(t.manana_desde ?? "08:00").slice(0, 5)}–
+                  {String(t.manana_hasta ?? "13:00").slice(0, 5)} · tarde{" "}
+                  {String(t.tarde_desde ?? "14:00").slice(0, 5)}–
+                  {String(t.tarde_hasta ?? "21:00").slice(0, 5)}
+                </span>
+              </summary>
+              <form action={actualizarHorarioTo} className="mt-2 grid gap-2">
+                <input type="hidden" name="to_id" value={t.id} />
+                {[
+                  { titulo: "Mañana", desde: "manana_desde", hasta: "manana_hasta", vd: t.manana_desde, vh: t.manana_hasta },
+                  { titulo: "Tarde", desde: "tarde_desde", hasta: "tarde_hasta", vd: t.tarde_desde, vh: t.tarde_hasta },
+                ].map((fr) => (
+                  <div key={fr.titulo} className="grid grid-cols-[4rem_1fr_1fr] items-center gap-2">
+                    <span className="text-xs font-bold text-green-dark">{fr.titulo}</span>
+                    <input
+                      type="time"
+                      name={fr.desde}
+                      step={300}
+                      defaultValue={String(fr.vd ?? "").slice(0, 5)}
+                      className="rounded-xl border border-black/10 px-3 py-2 text-sm outline-blue-mid"
+                    />
+                    <input
+                      type="time"
+                      name={fr.hasta}
+                      step={300}
+                      defaultValue={String(fr.vh ?? "").slice(0, 5)}
+                      className="rounded-xl border border-black/10 px-3 py-2 text-sm outline-blue-mid"
+                    />
+                  </div>
+                ))}
+                <p className="text-xs text-foreground/50">
+                  Se aplica de lunes a sábado. Los domingos no se atiende.
+                </p>
+                <Button type="submit" variant="secondary" className="justify-self-start">
+                  Guardar horario
                 </Button>
               </form>
             </details>

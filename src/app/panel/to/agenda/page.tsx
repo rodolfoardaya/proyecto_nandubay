@@ -7,6 +7,9 @@ import { FormularioBloqueo } from "@/components/FormularioBloqueo";
 import { borrarBloqueo, reactivarFecha } from "./actions";
 import {
   FRANJAS,
+  franjaDe,
+  HORARIO_POR_OMISION,
+  type HorarioTO,
   fechasDe,
   formatoCorto,
   formatoLargo,
@@ -48,7 +51,7 @@ export default async function Agenda({ searchParams }: { searchParams: Params })
   // Cada TO ve la suya; el admin elige cuál mirar.
   const { data: tos } = await supabase
     .from("tos")
-    .select("id, nombre, usuario_id")
+    .select("id, nombre, usuario_id, manana_desde, manana_hasta, tarde_desde, tarde_hasta")
     .eq("activo", true)
     .order("nombre");
 
@@ -120,6 +123,17 @@ export default async function Agenda({ searchParams }: { searchParams: Params })
 
   // En el mes se dibuja una grilla por semana; en día y semana, una sola.
   const semanasVisibles = vista === "mes" ? semanasDelMes(fecha) : [fechas];
+
+  // Horario de atención de la TO que se está mirando. Si todavía no tiene
+  // uno cargado, se usa el del consultorio.
+  const horario: HorarioTO = toActual
+    ? {
+        manana_desde: toActual.manana_desde ?? HORARIO_POR_OMISION.manana_desde,
+        manana_hasta: toActual.manana_hasta ?? HORARIO_POR_OMISION.manana_hasta,
+        tarde_desde: toActual.tarde_desde ?? HORARIO_POR_OMISION.tarde_desde,
+        tarde_hasta: toActual.tarde_hasta ?? HORARIO_POR_OMISION.tarde_hasta,
+      }
+    : HORARIO_POR_OMISION;
 
   // Pacientes que se ofrecen en el alta rápida de turnos: los que no están
   // dados de baja.
@@ -198,7 +212,7 @@ export default async function Agenda({ searchParams }: { searchParams: Params })
                 f === franja ? "bg-blue-mid text-white" : "border border-black/10"
               }`}
             >
-              {FRANJAS[f].etiqueta} {FRANJAS[f].desde}–{FRANJAS[f].hasta}
+              {franjaDe(f, horario).etiqueta} {franjaDe(f, horario).desde}–{franjaDe(f, horario).hasta}
             </Link>
           ))}
         </div>
@@ -238,6 +252,7 @@ export default async function Agenda({ searchParams }: { searchParams: Params })
                 bloqueos={bloqueos}
                 base={base}
                 seguimientos={seguimientos}
+                horario={horario}
               />
             </div>
           ))}

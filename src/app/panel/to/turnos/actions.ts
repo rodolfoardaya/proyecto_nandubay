@@ -60,9 +60,7 @@ export async function crearTurno(formData: FormData) {
     duracionMinutos: duracion_minutos,
     frecuencia: frecuencia as "unica" | "semanal",
     hasta: fecha_fin,
-    // Al calendario va el número de registro, no el nombre: ver la nota en
-    // google-calendar.ts sobre por qué los datos del paciente no salen afuera.
-    pacienteRegistro: paciente.numero_registro,
+    pacienteNombre: paciente.nombre,
     modalidad: modalidad as "presencial" | "online",
     /* @ts-expect-error relación anidada */
     toNombre: paciente.tos?.nombre ?? "TO",
@@ -131,7 +129,7 @@ export async function actualizarTurno(formData: FormData) {
 
   const { data: actual } = await supabase
     .from("turnos")
-    .select("google_event_id, pacientes(numero_registro), tos(nombre)")
+    .select("google_event_id, pacientes(nombre), tos(nombre)")
     .eq("id", turno_id)
     .single();
 
@@ -155,7 +153,7 @@ export async function actualizarTurno(formData: FormData) {
     hora,
     duracionMinutos: duracion_minutos,
     /* @ts-expect-error relación anidada */
-    pacienteRegistro: actual?.pacientes?.numero_registro ?? "Sin registro",
+    pacienteNombre: actual?.pacientes?.nombre ?? "Paciente",
     modalidad: modalidad as "presencial" | "online",
     /* @ts-expect-error relación anidada */
     toNombre: actual?.tos?.nombre ?? "TO",
@@ -212,14 +210,16 @@ export async function crearTurnoDesdeAgenda(
   // La TO a cargo sale del paciente cuando lo hay; si es alguien de afuera,
   // el turno queda a nombre de quien lo carga.
   let to_id: string | null = null;
+  let nombrePaciente: string | null = null;
   let registro: string | null = null;
   if (paciente_id) {
     const { data: p } = await supabase
       .from("pacientes")
-      .select("to_asignada_id, numero_registro")
+      .select("to_asignada_id, nombre, numero_registro")
       .eq("id", paciente_id)
       .single();
     to_id = p?.to_asignada_id ?? null;
+    nombrePaciente = p?.nombre ?? null;
     registro = p?.numero_registro ?? null;
   }
   if (!to_id) {
@@ -268,7 +268,7 @@ export async function crearTurnoDesdeAgenda(
     duracionMinutos: duracion_minutos,
     frecuencia: frecuencia as "unica" | "semanal",
     hasta: fecha_fin,
-    pacienteRegistro: registro ?? paciente_libre ?? "Turno",
+    pacienteNombre: nombrePaciente ?? paciente_libre ?? "Turno",
     modalidad: String(formData.get("modalidad") || "presencial") as "presencial" | "online",
     toNombre: toFila?.nombre ?? "TO",
   });

@@ -131,7 +131,7 @@ type TurnoEvento = {
   fecha: string; // YYYY-MM-DD
   hora: string; // HH:MM
   duracionMinutos: number;
-  pacienteRegistro: string; // número de registro, nunca el nombre
+  pacienteNombre: string; // apellido y nombre, como se lee en el calendario
   modalidad: "presencial" | "online";
   toNombre: string;
   frecuencia?: "unica" | "semanal";
@@ -140,18 +140,17 @@ type TurnoEvento = {
 
 // Qué se escribe en el evento de Google.
 //
-// Va el número de registro del paciente y no su nombre, a propósito. Google
-// está en Estados Unidos, que no integra la lista de países con nivel adecuado
-// de protección de la Disposición 60-E/2016. Aunque no se mande ningún dato
-// clínico, asociar a una persona con nombre y apellido a un consultorio de
-// Terapia Ocupacional ya permite inferir información de salud, y la mayoría de
-// los pacientes son chicos.
+// Va el apellido y nombre del paciente porque es lo único con lo que la
+// agenda se puede usar de verdad: con el número de registro había que ir al
+// sistema para saber de quién era cada turno.
 //
-// Con el número de registro la TO identifica el turno igual —lo tiene a la
-// vista en el sistema— y afuera no sale nada que permita saber de quién se
-// trata. Es más sencillo que justificar la transferencia.
+// Tiene un costo que conviene tener presente: Google está en Estados Unidos,
+// que no integra la lista de países con nivel adecuado de protección de la
+// Disposición 60-E/2016, y asociar a una persona identificada con un
+// consultorio de Terapia Ocupacional permite inferir un dato de salud. Es una
+// decisión tomada a sabiendas, no un descuido.
 function tituloEvento(turno: TurnoEvento) {
-  return `${turno.pacienteRegistro} — ${turno.toNombre}`;
+  return `${turno.pacienteNombre} — ${turno.toNombre}`;
 }
 
 // Suma minutos a "HH:MM" sin pasar por Date: convertir a Date usa la zona

@@ -10,9 +10,36 @@
 export type Franja = "manana" | "tarde";
 export type Vista = "dia" | "semana" | "mes";
 
+// Horario de atención. Ya no está fijo en el código: cada TO tiene el suyo y
+// se edita desde el panel del administrador. Esto es sólo el valor por
+// omisión, el que se usa mientras no se haya cargado otro.
+export type HorarioTO = {
+  manana_desde: string;
+  manana_hasta: string;
+  tarde_desde: string;
+  tarde_hasta: string;
+};
+
+export const HORARIO_POR_OMISION: HorarioTO = {
+  manana_desde: "08:00",
+  manana_hasta: "13:00",
+  tarde_desde: "14:00",
+  tarde_hasta: "21:00",
+};
+
+// Los extremos de una franja, ya en formato "HH:MM" para comparar con la
+// grilla. De Postgres las horas llegan como "HH:MM:SS".
+export function franjaDe(franja: Franja, horario: HorarioTO = HORARIO_POR_OMISION) {
+  return franja === "manana"
+    ? { etiqueta: "Mañana", desde: aHHMM(horario.manana_desde), hasta: aHHMM(horario.manana_hasta) }
+    : { etiqueta: "Tarde", desde: aHHMM(horario.tarde_desde), hasta: aHHMM(horario.tarde_hasta) };
+}
+
+// Se conserva el nombre FRANJAS para las pantallas que sólo necesitan las dos
+// etiquetas y un orden estable.
 export const FRANJAS: Record<Franja, { etiqueta: string; desde: string; hasta: string }> = {
-  manana: { etiqueta: "Mañana", desde: "08:00", hasta: "13:00" },
-  tarde: { etiqueta: "Tarde", desde: "15:00", hasta: "21:00" },
+  manana: franjaDe("manana"),
+  tarde: franjaDe("tarde"),
 };
 
 // La agenda se divide cada 5 minutos: es la unidad mínima con la que se
@@ -21,12 +48,11 @@ export const PASO_MINUTOS = 5;
 
 export const DIAS = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
 
-// El sábado sólo se atiende a la mañana.
-export function seAtiende(fechaIso: string, franja: Franja) {
-  const dia = diaDeSemana(fechaIso);
-  if (dia === 0) return false; // domingo
-  if (dia === 6) return franja === "manana";
-  return true;
+// Los domingos no se atiende. El resto de los días sí, en las dos franjas:
+// antes el sábado era un caso especial de sólo mañana, y dejó de serlo cuando
+// el consultorio pasó a atender también los sábados a la tarde.
+export function seAtiende(fechaIso: string) {
+  return diaDeSemana(fechaIso) !== 0;
 }
 
 function aMinutos(hhmm: string) {
@@ -40,8 +66,8 @@ function aHora(minutos: number) {
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
 }
 
-export function horariosDe(franja: Franja): string[] {
-  const { desde, hasta } = FRANJAS[franja];
+export function horariosDe(franja: Franja, horario: HorarioTO = HORARIO_POR_OMISION): string[] {
+  const { desde, hasta } = franjaDe(franja, horario);
   const horarios: string[] = [];
   for (let m = aMinutos(desde); m < aMinutos(hasta); m += PASO_MINUTOS) {
     horarios.push(aHora(m));

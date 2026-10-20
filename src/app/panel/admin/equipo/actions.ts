@@ -266,3 +266,40 @@ export async function subirFotoTo(formData: FormData) {
 
   revalidatePath("/panel/admin/equipo");
 }
+
+// Horario de atención de una TO. Se guarda por separado del resto de sus
+// datos: no es lo mismo corregir una matrícula que mover la agenda, y
+// mezclarlos haría que guardar el nombre pisara los horarios sin querer.
+export async function actualizarHorarioTo(formData: FormData) {
+  await requireRole("admin");
+  const supabase = await createClient();
+
+  const to_id = String(formData.get("to_id"));
+  const horario = {
+    manana_desde: String(formData.get("manana_desde") || "08:00"),
+    manana_hasta: String(formData.get("manana_hasta") || "13:00"),
+    tarde_desde: String(formData.get("tarde_desde") || "14:00"),
+    tarde_hasta: String(formData.get("tarde_hasta") || "21:00"),
+  };
+
+  // Lo mismo que verifica la base, pero acá se puede explicar: un horario
+  // invertido dejaría la agenda vacía sin decir por qué.
+  if (horario.manana_desde >= horario.manana_hasta) {
+    throw new Error("En la mañana, la hora de fin tiene que ser posterior a la de inicio.");
+  }
+  if (horario.tarde_desde >= horario.tarde_hasta) {
+    throw new Error("En la tarde, la hora de fin tiene que ser posterior a la de inicio.");
+  }
+
+  const { error } = await supabase.from("tos").update(horario).eq("id", to_id);
+  if (error) throw new Error(error.message);
+
+  await registrarAuditoria(
+    "horario_to",
+    `${to_id}: mañana ${horario.manana_desde}-${horario.manana_hasta}, ` +
+      `tarde ${horario.tarde_desde}-${horario.tarde_hasta}`
+  );
+  revalidatePath("/panel/admin/equipo");
+  revalidatePath("/panel/admin/agenda");
+  revalidatePath("/panel/to/agenda");
+}
