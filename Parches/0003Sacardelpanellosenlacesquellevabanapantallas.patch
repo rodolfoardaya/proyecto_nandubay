@@ -1,0 +1,79 @@
+From 41c3ea2aba614973c5f20cbc43918b7e66d1217b Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Tue, 18 Aug 2026 01:56:37 +0000
+Subject: [PATCH] Sacar del panel los enlaces que llevaban a pantallas que no
+ existen
+
+"Ver la agenda completa", en la agenda de turnos del paciente, apuntaba a
+/panel/<rol>/agenda. Existe para TO y para admin, pero no para direccion, que
+no tiene pantalla de agenda propia: entrar con ese rol y tocar el enlace daba
+404. Ahora no se le muestra.
+
+El menu lateral tenia ademas dos entradas "Biblioteca", una para TO y otra
+para admin, hacia rutas que nunca se construyeron. La tabla biblioteca_interna
+esta en la base desde la primera migracion, pero la pantalla no existe, asi
+que esas dos entradas dieron 404 desde el primer dia. Se quitan del menu.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01EjnuJtuDoQQ273ZJ4WFYew
+---
+ src/app/panel/layout.tsx                        |  6 ++++--
+ src/app/panel/to/pacientes/[id]/turnos/page.tsx | 11 ++++++++---
+ 2 files changed, 12 insertions(+), 5 deletions(-)
+
+diff --git a/src/app/panel/layout.tsx b/src/app/panel/layout.tsx
+index 05438ce..31f044e 100644
+--- a/src/app/panel/layout.tsx
++++ b/src/app/panel/layout.tsx
+@@ -6,6 +6,10 @@ import { signOut } from "@/app/login/actions";
+ import { VERSION } from "@/lib/version";
+ import { CierrePorInactividad } from "@/components/CierrePorInactividad";
+ 
++// Cada entrada tiene que corresponder a una pantalla que exista. Había dos
++// "Biblioteca" —una para TO y otra para admin— apuntando a rutas que nunca se
++// construyeron: la tabla biblioteca_interna está en la base desde la primera
++// migración, pero la pantalla no. Daban 404 desde siempre.
+ const NAV: Record<string, { href: string; label: string }[]> = {
+   to: [
+     { href: "/panel/to", label: "Inicio" },
+@@ -13,7 +17,6 @@ const NAV: Record<string, { href: string; label: string }[]> = {
+     { href: "/panel/to/pacientes", label: "Pacientes" },
+     { href: "/panel/to/facturacion", label: "Facturación" },
+     { href: "/panel/to/backups", label: "Backups" },
+-    { href: "/panel/to/biblioteca", label: "Biblioteca" },
+     { href: "/panel/to/reportes", label: "Reportes" },
+   ],
+   admin: [
+@@ -23,7 +26,6 @@ const NAV: Record<string, { href: string; label: string }[]> = {
+     { href: "/panel/admin/facturacion", label: "Facturación" },
+     { href: "/panel/admin/backups", label: "Backups" },
+     { href: "/panel/admin/backup-disco", label: "Backup del sistema en disco" },
+-    { href: "/panel/admin/biblioteca", label: "Biblioteca" },
+     { href: "/panel/admin/reportes", label: "Reportes" },
+     { href: "/panel/admin/equipo", label: "Equipo TO" },
+     { href: "/panel/admin/auditoria", label: "Auditoría" },
+diff --git a/src/app/panel/to/pacientes/[id]/turnos/page.tsx b/src/app/panel/to/pacientes/[id]/turnos/page.tsx
+index 0543e24..34e0324 100644
+--- a/src/app/panel/to/pacientes/[id]/turnos/page.tsx
++++ b/src/app/panel/to/pacientes/[id]/turnos/page.tsx
+@@ -92,9 +92,14 @@ export default async function TurnosDelPaciente({
+     <div className="max-w-3xl">
+       <div className="flex flex-wrap items-center justify-between gap-3">
+         <h2 className="font-bold text-green-dark">Agenda de turnos del paciente</h2>
+-        <Link href={`/panel/${usuario.rol}/agenda`} className="text-sm font-bold text-blue-mid hover:underline">
+-          Ver la agenda completa →
+-        </Link>
++        {/* Dirección no tiene pantalla de agenda propia: su rol es de
++            consulta de la historia clínica. Mostrarle el enlace la mandaba a
++            un 404. */}
++        {usuario.rol !== "direccion" && (
++          <Link href={`/panel/${usuario.rol}/agenda`} className="text-sm font-bold text-blue-mid hover:underline">
++            Ver la agenda completa →
++          </Link>
++        )}
+       </div>
+ 
+       {!soloLectura && (
+-- 
+2.43.0
+

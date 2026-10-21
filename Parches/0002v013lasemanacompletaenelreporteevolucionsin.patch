@@ -1,0 +1,780 @@
+From 3b47ec034c4160df73229622e01f479876067152 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Mon, 17 Aug 2026 22:59:25 +0000
+Subject: [PATCH 2/2] v013: la semana completa en el reporte, evolucion sin
+ ficha y correcciones del admin
+
+Reporte de turnos de la semana
+------------------------------
+Mostraba dos turnos donde habia seis. Las repeticiones de un turno semanal
+no son filas de la tabla: se guarda la definicion de la serie y las fechas se
+calculan al mirarlas. El reporte leia las filas crudas, asi que solo veia los
+turnos sueltos cargados en esos dias; toda paciente con turno fijo cargado en
+una semana anterior desaparecia. Ahora expande las series igual que la agenda,
+y saltea las fechas canceladas puntualmente, que antes tampoco miraba.
+
+De paso, "la semana" pasa a ser la semana del calendario, de lunes a sabado,
+que es la que la TO tiene en la cabeza. Eran los proximos siete dias corridos:
+pedido un lunes terminaba el lunes siguiente y no cerraba ninguna semana. El
+titulo del PDF ahora dice que dias cubre.
+
+Impresion de la evolucion
+-------------------------
+El boton "Imprimir historia" de la pantalla de evolucion bajaba la historia
+clinica entera: ficha de inicio, acuerdo terapeutico y evolucion. Para llevar
+a una interconsulta eso es todo lo que sobra. Ahora imprime los datos
+personales del paciente y las notas, nada mas. La historia completa sigue
+disponible en la portada del paciente, sin cambios.
+
+Correccion de datos y borrado de TO
+-----------------------------------
+Los datos personales del paciente solo se podian mirar: lo que se cargaba mal
+en el alta quedaba mal para siempre. El admin ahora los corrige desde la
+portada, salvo el numero de registro, que identifica la historia clinica. El
+valor anterior queda guardado por los triggers de auditoria.
+
+Y la TO de prueba no se podia borrar porque la tabla `tos` nunca tuvo
+politicas de UPDATE ni de DELETE. RLS en ese caso no rechaza: descarta las
+filas en silencio, y un UPDATE que no alcanza ninguna fila es un UPDATE
+exitoso. Por eso "Editar datos", "Dar de baja" y el cambio de foto venian
+diciendo que guardaban sin guardar nada. La migracion 0019 agrega las dos
+politicas que faltaban, y el panel suma un borrado real, que se niega si la TO
+tiene pacientes, turnos, evolucion o facturas a su nombre.
+
+Requiere aplicar supabase/migrations/0019_tos_admin_update_delete.sql.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01EjnuJtuDoQQ273ZJ4WFYew
+---
+ src/app/api/imprimir/evolucion/route.tsx      |  69 ++++++++++++
+ src/app/api/reporte-turnos/route.tsx          |  89 ++++++++++++---
+ src/app/panel/admin/equipo/actions.ts         |  66 +++++++++++
+ src/app/panel/admin/equipo/page.tsx           |  38 +++++--
+ src/app/panel/admin/pacientes/actions.ts      |  46 ++++++++
+ .../to/pacientes/[id]/evolucion/page.tsx      |   7 +-
+ src/app/panel/to/pacientes/[id]/page.tsx      |  63 +++++++++++
+ src/app/panel/to/reportes/page.tsx            |   5 +-
+ src/components/ui/BotonConfirmar.tsx          |  36 ++++++
+ src/lib/pdf/EvolucionDoc.tsx                  | 105 ++++++++++++++++++
+ src/lib/version.ts                            |   2 +-
+ .../0019_tos_admin_update_delete.sql          |  25 +++++
+ 12 files changed, 519 insertions(+), 32 deletions(-)
+ create mode 100644 src/app/api/imprimir/evolucion/route.tsx
+ create mode 100644 src/components/ui/BotonConfirmar.tsx
+ create mode 100644 src/lib/pdf/EvolucionDoc.tsx
+ create mode 100644 supabase/migrations/0019_tos_admin_update_delete.sql
+
+diff --git a/src/app/api/imprimir/evolucion/route.tsx b/src/app/api/imprimir/evolucion/route.tsx
+new file mode 100644
+index 0000000..6ff600e
+--- /dev/null
++++ b/src/app/api/imprimir/evolucion/route.tsx
+@@ -0,0 +1,69 @@
++import { NextRequest, NextResponse } from "next/server";
++import { renderToBuffer } from "@react-pdf/renderer";
++import { getUsuarioActual } from "@/lib/auth";
++import { createClient } from "@/lib/supabase/server";
++import { registrarAuditoria } from "@/lib/auditoria";
++import { metaImpresion } from "@/lib/pdf/comunes";
++import { EvolucionDoc, type NotaEvolucion } from "@/lib/pdf/EvolucionDoc";
++
++// Imprime sólo los datos personales del paciente y su evolución. RLS decide
++// qué pacientes puede ver cada usuario.
++export async function GET(request: NextRequest) {
++  const usuario = await getUsuarioActual();
++  if (!usuario || !["to", "admin", "direccion"].includes(usuario.rol)) {
++    return NextResponse.json({ error: "No autorizado" }, { status: 401 });
++  }
++
++  const pacienteId = request.nextUrl.searchParams.get("paciente_id");
++  if (!pacienteId) {
++    return NextResponse.json({ error: "Falta paciente_id" }, { status: 400 });
++  }
++
++  const supabase = await createClient();
++
++  const { data: paciente } = await supabase
++    .from("pacientes")
++    .select("nombre, numero_registro, tipo, dni, fecha_nacimiento, tos(nombre)")
++    .eq("id", pacienteId)
++    .maybeSingle();
++
++  if (!paciente) {
++    return NextResponse.json({ error: "Paciente no encontrado" }, { status: 404 });
++  }
++
++  const { data: evolucion } = await supabase
++    .from("notas_evolucion")
++    .select("fecha, nota, objetivos_trabajados")
++    .eq("paciente_id", pacienteId)
++    .order("fecha", { ascending: false });
++
++  const to = paciente.tos as unknown as { nombre: string } | { nombre: string }[] | null;
++  const toNombre = Array.isArray(to) ? to[0]?.nombre : to?.nombre;
++
++  await registrarAuditoria(
++    "impresion",
++    `Evolución — paciente Nº ${paciente.numero_registro}`
++  );
++
++  const buffer = await renderToBuffer(
++    <EvolucionDoc
++      paciente={{
++        nombre: paciente.nombre,
++        numero_registro: paciente.numero_registro,
++        tipo: paciente.tipo,
++        dni: paciente.dni,
++        fecha_nacimiento: paciente.fecha_nacimiento,
++        to_nombre: toNombre ?? null,
++      }}
++      notas={(evolucion ?? []) as NotaEvolucion[]}
++      meta={metaImpresion(usuario.nombre)}
++    />
++  );
++
++  return new NextResponse(buffer as unknown as BodyInit, {
++    headers: {
++      "Content-Type": "application/pdf",
++      "Content-Disposition": `inline; filename="evolucion-${paciente.numero_registro}.pdf"`,
++    },
++  });
++}
+diff --git a/src/app/api/reporte-turnos/route.tsx b/src/app/api/reporte-turnos/route.tsx
+index e71ee3a..2da63a2 100644
+--- a/src/app/api/reporte-turnos/route.tsx
++++ b/src/app/api/reporte-turnos/route.tsx
+@@ -5,6 +5,14 @@ import { createClient } from "@/lib/supabase/server";
+ import { registrarAuditoria } from "@/lib/auditoria";
+ import { metaImpresion } from "@/lib/pdf/comunes";
+ import { ReporteTurnosDoc, type TurnoReporte } from "@/lib/pdf/ReporteTurnosDoc";
++import {
++  aHHMM,
++  formatoCorto,
++  hoyIso,
++  ocurrenciasEn,
++  semanaDe,
++  type Turno,
++} from "@/lib/agenda";
+ 
+ export async function GET(request: NextRequest) {
+   const usuario = await getUsuarioActual();
+@@ -13,35 +21,82 @@ export async function GET(request: NextRequest) {
+   }
+ 
+   const rango = request.nextUrl.searchParams.get("rango") === "semana" ? "semana" : "dia";
+-  const hoy = new Date().toISOString().slice(0, 10);
+-  const hasta =
+-    rango === "semana"
+-      ? new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10)
+-      : hoy;
++
++  // La semana es la del calendario, de lunes a sábado, igual que la agenda:
++  // pedir "la semana" y recibir los próximos siete días corridos hacía que el
++  // reporte del lunes terminara el lunes siguiente y no cerrara ninguna semana.
++  const hoy = hoyIso();
++  const fechas = rango === "semana" ? semanaDe(hoy) : [hoy];
++  const desde = fechas[0];
++  const hasta = fechas[fechas.length - 1];
+ 
+   const supabase = await createClient();
+ 
+   // RLS ya restringe: TO ve sus turnos, Admin ve todos.
+-  const { data: turnos } = await supabase
++  //
++  // Las repeticiones de un turno semanal no son filas: la tabla guarda la
++  // definición de la serie y las fechas se calculan. Por eso se traen todas
++  // las series que empezaron antes del corte —no sólo las que arrancan dentro
++  // del rango— y recién después se las expande. Filtrar por `fecha` acá era
++  // lo que dejaba afuera a todo paciente semanal cargado en otra semana.
++  const { data: turnosRaw } = await supabase
+     .from("turnos")
+-    .select("fecha, hora, modalidad, estado, pacientes(nombre), tos(nombre)")
+-    .gte("fecha", hoy)
+-    .lte("fecha", hasta)
+-    .order("fecha")
+-    .order("hora");
++    .select(
++      "id, fecha, hora, estado, modalidad, frecuencia, fecha_fin, duracion_minutos, paciente_id, pacientes(nombre), tos(nombre)"
++    )
++    .lte("fecha", hasta);
+ 
+-  const datos: TurnoReporte[] = (turnos ?? []).map((t) => ({
++  const series: Turno[] = (turnosRaw ?? []).map((t) => ({
++    id: t.id,
+     fecha: t.fecha,
+     hora: t.hora,
+-    /* @ts-expect-error relación anidada */
+-    pacienteNombre: t.pacientes?.nombre ?? "",
+-    /* @ts-expect-error relación anidada */
+-    toNombre: t.tos?.nombre ?? "",
++    estado: t.estado,
++    modalidad: t.modalidad,
++    frecuencia: (t.frecuencia ?? "unica") as Turno["frecuencia"],
++    fecha_fin: t.fecha_fin,
++    duracion_minutos: t.duracion_minutos ?? 45,
++    paciente_id: t.paciente_id,
++    // @ts-expect-error relación anidada
++    paciente: t.pacientes?.nombre ?? "",
++  }));
++
++  // El nombre de la TO no viaja en la serie, pero se necesita en el listado.
++  const toPorTurno = new Map(
++    (turnosRaw ?? []).map((t) => [
++      t.id,
++      // @ts-expect-error relación anidada
++      (t.tos?.nombre as string | undefined) ?? "",
++    ])
++  );
++
++  // Las fechas canceladas puntualmente no son turnos: se saltean.
++  const { data: excepciones } = await supabase
++    .from("turnos_excepciones")
++    .select("turno_id, fecha")
++    .gte("fecha", desde)
++    .lte("fecha", hasta);
++
++  const ocurrencias = ocurrenciasEn(series, desde, hasta, excepciones ?? []).sort(
++    (a, b) =>
++      a.fechaOcurrencia.localeCompare(b.fechaOcurrencia) || a.hora.localeCompare(b.hora)
++  );
++
++  const datos: TurnoReporte[] = ocurrencias.map((t) => ({
++    fecha: t.fechaOcurrencia,
++    hora: aHHMM(t.hora),
++    pacienteNombre: t.paciente,
++    toNombre: toPorTurno.get(t.id) ?? "",
+     modalidad: t.modalidad,
+     estado: t.estado,
+   }));
+ 
+-  const titulo = rango === "semana" ? "Reporte de turnos — semana" : "Reporte de turnos — hoy";
++  // El título dice el rango cubierto: sin eso no hay forma de saber, mirando
++  // el papel, qué días entraron en el reporte.
++  const titulo =
++    rango === "semana"
++      ? `Reporte de turnos — semana del ${formatoCorto(desde)} al ${formatoCorto(hasta)}`
++      : `Reporte de turnos — ${formatoCorto(hoy)}`;
++
+   await registrarAuditoria("exportacion", `Reporte de turnos (${rango}) — ${datos.length} turnos`);
+   const buffer = await renderToBuffer(
+     <ReporteTurnosDoc titulo={titulo} turnos={datos} meta={metaImpresion(usuario.nombre)} />
+diff --git a/src/app/panel/admin/equipo/actions.ts b/src/app/panel/admin/equipo/actions.ts
+index 3732b17..1a684db 100644
+--- a/src/app/panel/admin/equipo/actions.ts
++++ b/src/app/panel/admin/equipo/actions.ts
+@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
+ import { requireRole } from "@/lib/auth";
+ import { createAdminClient } from "@/lib/supabase/admin";
+ import { createClient } from "@/lib/supabase/server";
++import { registrarAuditoria } from "@/lib/auditoria";
+ 
+ // Sin caracteres que se confundan al dictarla o anotarla (O/0, I/1, l).
+ function generarClaveProvisoria(): string {
+@@ -103,6 +104,71 @@ export async function cambiarEstadoTo(formData: FormData) {
+   revalidatePath("/panel/admin/equipo");
+ }
+ 
++// Borrado real de una TO, para sacar del sistema una cargada por error o de
++// prueba. Distinto de la baja: la baja la deja archivada y se puede revertir.
++//
++// Solo se permite si no quedó nada colgando de ella. Una TO con pacientes,
++// turnos, evolución o facturas no se borra: esa información es historia
++// clínica y tiene que conservarse (Ley 26.529). La base ya lo impide por
++// clave foránea; acá se comprueba antes para poder decir qué es lo que lo
++// impide, en vez de mostrar el error crudo de Postgres.
++export async function borrarTo(formData: FormData) {
++  await requireRole("admin");
++
++  const to_id = String(formData.get("to_id"));
++  const admin = createAdminClient();
++
++  const { data: to } = await admin
++    .from("tos")
++    .select("id, nombre, usuario_id")
++    .eq("id", to_id)
++    .maybeSingle();
++
++  if (!to) throw new Error("Esa TO ya no existe.");
++
++  // El conteo va con el cliente de servicio a propósito: si RLS escondiera
++  // una fila, el control diría que no hay nada y el borrado se llevaría
++  // puesta información que sí existe.
++  const tablas = [
++    { tabla: "pacientes", columna: "to_asignada_id", etiqueta: "pacientes" },
++    { tabla: "turnos", columna: "to_id", etiqueta: "turnos" },
++    { tabla: "notas_evolucion", columna: "to_id", etiqueta: "notas de evolución" },
++    { tabla: "facturas", columna: "to_id", etiqueta: "facturas" },
++  ];
++
++  const atados: string[] = [];
++  for (const { tabla, columna, etiqueta } of tablas) {
++    const { count } = await admin
++      .from(tabla)
++      .select("id", { count: "exact", head: true })
++      .eq(columna, to_id);
++    if (count) atados.push(`${count} ${etiqueta}`);
++  }
++
++  if (atados.length > 0) {
++    throw new Error(
++      `No se puede borrar a ${to.nombre}: tiene ${atados.join(", ")} a su nombre. ` +
++        "Esa información es historia clínica y no se elimina. Usá \"Dar de baja\", " +
++        "que la saca de las listas sin perder nada."
++    );
++  }
++
++  const supabase = await createClient();
++  const { error } = await supabase.from("tos").delete().eq("id", to_id);
++  if (error) throw new Error(error.message);
++
++  // La cuenta de acceso se borra después de la fila: al borrar el usuario de
++  // auth, la fila de `usuarios` cae por cascada, y con ella habría caído
++  // también la de `tos` sin dejar registro de por qué.
++  if (to.usuario_id) {
++    await admin.auth.admin.deleteUser(to.usuario_id);
++  }
++
++  await registrarAuditoria("baja_to", `${to.nombre} — borrada del sistema`);
++
++  revalidatePath("/panel/admin/equipo");
++}
++
+ export async function subirFotoTo(formData: FormData) {
+   await requireRole("admin");
+   const supabase = await createClient();
+diff --git a/src/app/panel/admin/equipo/page.tsx b/src/app/panel/admin/equipo/page.tsx
+index 4f1a288..b2d4795 100644
+--- a/src/app/panel/admin/equipo/page.tsx
++++ b/src/app/panel/admin/equipo/page.tsx
+@@ -3,7 +3,8 @@ import { createClient } from "@/lib/supabase/server";
+ import { Card } from "@/components/ui/Card";
+ import { Button } from "@/components/ui/Button";
+ import { ResetearClaveButton } from "@/components/ResetearClaveButton";
+-import { crearTo, actualizarTo, cambiarEstadoTo, subirFotoTo } from "./actions";
++import { BotonConfirmar } from "@/components/ui/BotonConfirmar";
++import { crearTo, actualizarTo, cambiarEstadoTo, borrarTo, subirFotoTo } from "./actions";
+ 
+ function iniciales(nombre: string) {
+   return nombre
+@@ -190,16 +191,31 @@ export default async function EquipoTo({
+               </form>
+             </details>
+ 
+-            <form action={cambiarEstadoTo} className="mt-2">
+-              <input type="hidden" name="to_id" value={t.id} />
+-              <input type="hidden" name="activo" value={(!t.activo).toString()} />
+-              <button
+-                type="submit"
+-                className={`text-xs font-semibold hover:underline ${t.activo ? "text-orange" : "text-green-mid"}`}
+-              >
+-                {t.activo ? "Dar de baja" : "Reactivar"}
+-              </button>
+-            </form>
++            <div className="mt-2 flex flex-wrap items-center gap-4">
++              <form action={cambiarEstadoTo}>
++                <input type="hidden" name="to_id" value={t.id} />
++                <input type="hidden" name="activo" value={(!t.activo).toString()} />
++                <button
++                  type="submit"
++                  className={`text-xs font-semibold hover:underline ${t.activo ? "text-orange" : "text-green-mid"}`}
++                >
++                  {t.activo ? "Dar de baja" : "Reactivar"}
++                </button>
++              </form>
++
++              {/* Borrado real, para las cargadas por error o de prueba. Si la
++                  TO tiene pacientes, turnos, evolución o facturas, la acción
++                  se niega y explica por qué: eso es historia clínica. */}
++              <form action={borrarTo}>
++                <input type="hidden" name="to_id" value={t.id} />
++                <BotonConfirmar
++                  confirmacion={`¿Borrar a ${t.nombre} del sistema? No se puede deshacer. Si tiene pacientes o turnos cargados, no se va a borrar.`}
++                  className="text-xs font-semibold text-red-700 hover:underline"
++                >
++                  Borrar del sistema
++                </BotonConfirmar>
++              </form>
++            </div>
+           </Card>
+         ))}
+         {!tos?.length && (
+diff --git a/src/app/panel/admin/pacientes/actions.ts b/src/app/panel/admin/pacientes/actions.ts
+index 505eab0..5161be3 100644
+--- a/src/app/panel/admin/pacientes/actions.ts
++++ b/src/app/panel/admin/pacientes/actions.ts
+@@ -5,6 +5,52 @@ import { requireRole } from "@/lib/auth";
+ import { createClient } from "@/lib/supabase/server";
+ import { registrarAuditoria } from "@/lib/auditoria";
+ 
++// Corrección de los datos personales del paciente: lo que se cargó mal en el
++// alta y hasta ahora sólo se podía mirar. El número de registro no se toca —
++// identifica la historia clínica y sale de la letra de la TO— y de la baja se
++// encarga la acción de abajo.
++//
++// No hace falta registrar la auditoría a mano: los triggers de
++// 0006_auditoria.sql guardan el valor anterior de la fila en cada UPDATE, que
++// es justamente el historial de correcciones que exige la Ley 26.529.
++export async function actualizarDatosPaciente(formData: FormData) {
++  await requireRole("admin");
++  const supabase = await createClient();
++
++  const paciente_id = String(formData.get("paciente_id"));
++  const nombre = String(formData.get("nombre") || "").trim();
++  const tipo = String(formData.get("tipo") || "");
++  const fecha_nacimiento = String(formData.get("fecha_nacimiento") || "") || null;
++  // Igual que en el alta: sólo dígitos, para que la comparación con lo ya
++  // cargado no falle por un punto de miles de diferencia.
++  const dni = String(formData.get("dni") || "").replace(/\D/g, "") || null;
++
++  if (!nombre) throw new Error("El apellido y nombre no puede quedar vacío.");
++  if (tipo !== "nino" && tipo !== "adulto") {
++    throw new Error("El tipo de ficha tiene que ser niño o adulto.");
++  }
++
++  const { error } = await supabase
++    .from("pacientes")
++    .update({ nombre, tipo, fecha_nacimiento, dni })
++    .eq("id", paciente_id);
++
++  if (error) {
++    // 23505 es el índice único de 0014: ya hay otro paciente activo con ese
++    // DNI, o con ese mismo nombre y fecha de nacimiento.
++    if (error.code === "23505") {
++      throw new Error(
++        "Esos datos ya están cargados en otro paciente activo. Revisá el listado: " +
++          "puede ser el mismo paciente cargado dos veces."
++      );
++    }
++    throw new Error(error.message);
++  }
++
++  revalidatePath("/panel/admin/pacientes");
++  revalidatePath(`/panel/admin/pacientes/${paciente_id}`);
++}
++
+ // Dar de baja NO borra nada: la ficha, el acuerdo, la evolución y el rastro
+ // de auditoría quedan intactos, como exige la Ley 26.529. Sólo saca al
+ // paciente de las listas de trabajo, y se puede revertir.
+diff --git a/src/app/panel/to/pacientes/[id]/evolucion/page.tsx b/src/app/panel/to/pacientes/[id]/evolucion/page.tsx
+index 033b44c..34599e3 100644
+--- a/src/app/panel/to/pacientes/[id]/evolucion/page.tsx
++++ b/src/app/panel/to/pacientes/[id]/evolucion/page.tsx
+@@ -39,13 +39,16 @@ export default async function EvolucionDelPaciente({
+             {notas.length} {notas.length === 1 ? "nota" : "notas"}
+           </span>
+         </h2>
++        {/* Imprime datos personales + evolución, nada más. La historia
++            completa —con ficha de inicio y acuerdo— sigue estando en la
++            portada del paciente. */}
+         <a
+-          href={`/api/backup?paciente_id=${id}`}
++          href={`/api/imprimir/evolucion?paciente_id=${id}`}
+           target="_blank"
+           rel="noreferrer"
+           className="text-sm font-bold text-blue-mid hover:underline"
+         >
+-          Imprimir historia ↗
++          Imprimir evolución ↗
+         </a>
+       </div>
+ 
+diff --git a/src/app/panel/to/pacientes/[id]/page.tsx b/src/app/panel/to/pacientes/[id]/page.tsx
+index acec52f..f129001 100644
+--- a/src/app/panel/to/pacientes/[id]/page.tsx
++++ b/src/app/panel/to/pacientes/[id]/page.tsx
+@@ -5,6 +5,8 @@ import { SECCIONES_NINOS, SECCIONES_ADULTOS, type DatosFicha } from "@/lib/ficha
+ import { Card } from "@/components/ui/Card";
+ import { calcularDatosFaltantes } from "@/lib/datos-faltantes";
+ import { SECCIONES_PACIENTE } from "@/lib/paciente-vista";
++import { BotonEnvio } from "@/components/ui/BotonEnvio";
++import { actualizarDatosPaciente } from "@/app/panel/admin/pacientes/actions";
+ 
+ // Portada del paciente: sus datos y el acceso a cada parte de la historia.
+ export default async function PortadaPaciente({
+@@ -62,6 +64,66 @@ export default async function PortadaPaciente({
+           {/* @ts-expect-error relación anidada */}
+           {dato("TO a cargo", paciente.tos?.nombre)}
+         </dl>
++
++        {/* Corregir lo que se cargó mal en el alta. Sólo el admin: para la TO
++            estos datos siguen siendo de lectura. El número de registro no
++            entra, porque identifica la historia clínica. */}
++        {usuario.rol === "admin" && (
++          <details className="mt-4">
++            <summary className="cursor-pointer text-xs font-semibold text-blue-mid">
++              Corregir datos personales
++            </summary>
++            <form action={actualizarDatosPaciente} className="mt-3 grid gap-3 sm:grid-cols-2">
++              <input type="hidden" name="paciente_id" value={id} />
++              <label className="text-xs font-semibold text-foreground/70">
++                Apellido y nombre
++                <input
++                  required
++                  name="nombre"
++                  defaultValue={paciente.nombre}
++                  className="mt-1 w-full rounded-xl border border-black/10 px-3 py-2 text-sm outline-blue-mid"
++                />
++              </label>
++              <label className="text-xs font-semibold text-foreground/70">
++                DNI
++                <input
++                  name="dni"
++                  defaultValue={paciente.dni ?? ""}
++                  inputMode="numeric"
++                  className="mt-1 w-full rounded-xl border border-black/10 px-3 py-2 text-sm outline-blue-mid"
++                />
++              </label>
++              <label className="text-xs font-semibold text-foreground/70">
++                Fecha de nacimiento
++                <input
++                  type="date"
++                  name="fecha_nacimiento"
++                  defaultValue={paciente.fecha_nacimiento ?? ""}
++                  className="mt-1 w-full rounded-xl border border-black/10 px-3 py-2 text-sm outline-blue-mid"
++                />
++              </label>
++              <label className="text-xs font-semibold text-foreground/70">
++                Tipo de ficha
++                <select
++                  name="tipo"
++                  defaultValue={paciente.tipo}
++                  className="mt-1 w-full rounded-xl border border-black/10 px-3 py-2 text-sm outline-blue-mid"
++                >
++                  <option value="nino">Niño</option>
++                  <option value="adulto">Adulto</option>
++                </select>
++              </label>
++              <p className="text-xs text-foreground/60 sm:col-span-2">
++                El Nº de registro no se modifica: identifica la historia
++                clínica. Cambiar el tipo de ficha cambia qué campos se muestran
++                en la ficha de inicio; lo ya cargado no se borra.
++              </p>
++              <BotonEnvio variant="secondary" className="justify-self-start sm:col-span-2">
++                Guardar datos personales
++              </BotonEnvio>
++            </form>
++          </details>
++        )}
+       </section>
+ 
+       {datosFaltantes.length > 0 && (
+@@ -102,6 +164,7 @@ export default async function PortadaPaciente({
+         {[
+           { href: `/api/imprimir/ficha?paciente_id=${id}`, label: "Ficha de inicio" },
+           { href: `/api/imprimir/acuerdo?paciente_id=${id}`, label: "Acuerdo terapéutico" },
++          { href: `/api/imprimir/evolucion?paciente_id=${id}`, label: "Evolución" },
+           { href: `/api/backup?paciente_id=${id}`, label: "Historia clínica completa" },
+         ].map((b) => (
+           <a
+diff --git a/src/app/panel/to/reportes/page.tsx b/src/app/panel/to/reportes/page.tsx
+index 7db4a5e..00defe7 100644
+--- a/src/app/panel/to/reportes/page.tsx
++++ b/src/app/panel/to/reportes/page.tsx
+@@ -20,7 +20,10 @@ export default async function Reportes() {
+           </a>
+         </Card>
+         <Card>
+-          <p className="font-bold text-green-dark">Próximos 7 días</p>
++          <p className="font-bold text-green-dark">Turnos de la semana</p>
++          <p className="mt-1 text-xs text-foreground/60">
++            De lunes a sábado, la semana en curso.
++          </p>
+           <a
+             href="/api/reporte-turnos?rango=semana"
+             className="mt-3 inline-block rounded-full bg-green-mid px-5 py-2 font-bold text-white hover:bg-green-dark"
+diff --git a/src/components/ui/BotonConfirmar.tsx b/src/components/ui/BotonConfirmar.tsx
+new file mode 100644
+index 0000000..4db9a1a
+--- /dev/null
++++ b/src/components/ui/BotonConfirmar.tsx
+@@ -0,0 +1,36 @@
++"use client";
++
++import { useFormStatus } from "react-dom";
++
++// Botón de envío para acciones que no se pueden deshacer: pide confirmación
++// antes de mandar el formulario, y se deshabilita mientras está en curso.
++//
++// Va como enlace de texto, no como botón grande, para que una acción
++// destructiva no compita visualmente con las de uso diario.
++export function BotonConfirmar({
++  children,
++  confirmacion,
++  enCurso = "Borrando...",
++  className,
++}: {
++  children: React.ReactNode;
++  confirmacion: string;
++  enCurso?: string;
++  className?: string;
++}) {
++  const { pending } = useFormStatus();
++
++  return (
++    <button
++      type="submit"
++      disabled={pending}
++      aria-busy={pending}
++      onClick={(e) => {
++        if (!confirm(confirmacion)) e.preventDefault();
++      }}
++      className={`${className ?? ""} disabled:cursor-not-allowed disabled:opacity-60`}
++    >
++      {pending ? enCurso : children}
++    </button>
++  );
++}
+diff --git a/src/lib/pdf/EvolucionDoc.tsx b/src/lib/pdf/EvolucionDoc.tsx
+new file mode 100644
+index 0000000..0cb98b1
+--- /dev/null
++++ b/src/lib/pdf/EvolucionDoc.tsx
+@@ -0,0 +1,105 @@
++import { Document, Page, Text, View } from "@react-pdf/renderer";
++import {
++  CabeceraImpresion,
++  Membrete,
++  PieConfidencial,
++  estilos,
++  type MetaImpresion,
++} from "@/lib/pdf/comunes";
++
++// La evolución sola: datos personales del paciente y, a continuación, las
++// notas. Sin ficha de inicio ni acuerdo terapéutico.
++//
++// Es lo que se lleva a una interconsulta o se adjunta a un informe: ahí sobra
++// —y a veces molesta— el resto de la historia clínica. Para el legajo
++// completo está la "Historia clínica completa" (/api/backup), que no cambia.
++export type PacienteEvolucion = {
++  nombre: string;
++  numero_registro: string;
++  tipo: string;
++  fecha_nacimiento: string | null;
++  dni: string | null;
++  to_nombre: string | null;
++};
++
++export type NotaEvolucion = {
++  fecha: string;
++  nota: string;
++  objetivos_trabajados: string | null;
++};
++
++const datoFila = {
++  flexDirection: "row" as const,
++  marginBottom: 2,
++};
++
++const datoEtiqueta = {
++  fontFamily: "Helvetica-Bold",
++  width: 120,
++};
++
++function Dato({ etiqueta, valor }: { etiqueta: string; valor: string | null }) {
++  if (!valor) return null;
++  return (
++    <View style={datoFila}>
++      <Text style={datoEtiqueta}>{etiqueta}</Text>
++      <Text>{valor}</Text>
++    </View>
++  );
++}
++
++export function EvolucionDoc({
++  paciente,
++  notas,
++  meta,
++}: {
++  paciente: PacienteEvolucion;
++  notas: NotaEvolucion[];
++  meta: MetaImpresion;
++}) {
++  return (
++    <Document title={`Evolución — ${paciente.nombre}`}>
++      <Page size="A4" style={estilos.page}>
++        <CabeceraImpresion
++          meta={meta}
++          paciente={{
++            nombre: paciente.nombre,
++            numero_registro: paciente.numero_registro,
++            dni: paciente.dni,
++            fecha_nacimiento: paciente.fecha_nacimiento,
++          }}
++        />
++        <PieConfidencial />
++
++        <Membrete titulo="EVOLUCIÓN" />
++
++        <Text style={estilos.seccion}>Datos personales</Text>
++        <View style={{ paddingLeft: 10 }}>
++          <Dato etiqueta="Apellido y nombre" valor={paciente.nombre} />
++          <Dato etiqueta="Nº de registro" valor={paciente.numero_registro} />
++          <Dato etiqueta="DNI" valor={paciente.dni} />
++          <Dato etiqueta="Fecha de nacimiento" valor={paciente.fecha_nacimiento} />
++          <Dato etiqueta="Tipo de ficha" valor={paciente.tipo} />
++          <Dato etiqueta="TO a cargo" valor={paciente.to_nombre} />
++        </View>
++
++        {/* De la última fecha hacia atrás, como exige la consulta de historia
++            clínica y como ya se listan en pantalla. */}
++        <Text style={estilos.seccion}>Notas de evolución</Text>
++        {notas.length > 0 ? (
++          notas.map((n, i) => (
++            <View key={i} style={{ marginBottom: 6 }} wrap={false}>
++              <Text style={estilos.etiqueta}>{n.fecha}</Text>
++              <Text style={estilos.item}>{n.nota}</Text>
++              {n.objetivos_trabajados && (
++                <Text style={estilos.observacion}>Objetivos: {n.objetivos_trabajados}</Text>
++              )}
++            </View>
++          ))
++        ) : (
++          <Text style={estilos.item}>Sin notas de evolución.</Text>
++        )}
++      </Page>
++    </Document>
++  );
++}
+diff --git a/src/lib/version.ts b/src/lib/version.ts
+index 0bf8185..c50fa4e 100644
+--- a/src/lib/version.ts
++++ b/src/lib/version.ts
+@@ -1,3 +1,3 @@
+ // Version del sistema. Se muestra arriba a la derecha en el panel para
+ // poder confirmar de un vistazo que el despliegue tomo el codigo nuevo.
+-export const VERSION = "V012";
++export const VERSION = "V013";
+diff --git a/supabase/migrations/0019_tos_admin_update_delete.sql b/supabase/migrations/0019_tos_admin_update_delete.sql
+new file mode 100644
+index 0000000..74c9e96
+--- /dev/null
++++ b/supabase/migrations/0019_tos_admin_update_delete.sql
+@@ -0,0 +1,25 @@
++-- La tabla `tos` quedó desde el inicio (0001_init.sql) con dos políticas
++-- solamente: lectura pública, para la landing, e inserción del admin. Sin
++-- política de UPDATE ni de DELETE, RLS no rechaza con un error: descarta las
++-- filas en silencio. Un UPDATE que no alcanza ninguna fila es un UPDATE
++-- exitoso que afectó cero filas, y PostgREST devuelve 204.
++--
++-- Por eso, en el panel de admin, "Editar datos", "Dar de baja"/"Reactivar" y
++-- el cambio de foto de una TO decían que habían guardado y no guardaban nada,
++-- y por eso no había manera de sacar del sistema una TO cargada de prueba.
++--
++-- Se agregan las dos políticas que faltaban, solo para admin.
++
++create policy "tos_update_admin" on tos for update
++  using (auth_rol() = 'admin')
++  with check (auth_rol() = 'admin');
++
++create policy "tos_delete_admin" on tos for delete
++  using (auth_rol() = 'admin');
++
++-- Nota sobre el borrado: las claves foráneas de pacientes, turnos,
++-- notas_evolucion y facturas contra tos(id) no tienen ON DELETE, así que son
++-- RESTRICT. Una TO con historia clínica asociada no se puede borrar aunque el
++-- admin lo intente, y eso es deliberado: esa historia debe conservarse (Ley
++-- 26.529). Para esos casos está la baja lógica. Solo bloqueos_agenda cae con
++-- la TO, porque no es información clínica.
+-- 
+2.43.0
+

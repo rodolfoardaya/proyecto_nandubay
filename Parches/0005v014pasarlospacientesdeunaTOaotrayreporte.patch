@@ -1,0 +1,319 @@
+From 1f60ef5ed838f5fdc08a1843d936e9b0a9d2a703 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Tue, 18 Aug 2026 02:30:17 +0000
+Subject: [PATCH] v014: pasar los pacientes de una TO a otra, y reporte por TO
+
+Reasignacion
+------------
+Borrar una TO con pacientes esta bloqueado a proposito: esa informacion es
+historia clinica. Pero entonces una TO cargada dos veces, o que deja el
+consultorio, no habia forma de sacarla del sistema. Faltaba el paso previo.
+
+Ahora, en Equipo TO, cada una tiene "Pasar sus pacientes a otra TO": mueve
+pacientes, turnos, notas de evolucion y facturas a la que se elija. Hecho eso
+queda vacia y "Borrar del sistema" la borra sin objetar.
+
+El numero de registro de los pacientes no cambia. Se genero con la letra de
+quien los dio de alta y es el identificador de su historia clinica: un
+paciente reasignado conserva el suyo, como en cualquier archivo en papel.
+
+Los bloqueos de agenda no se mueven, porque no son informacion del paciente
+sino las horas que esa persona se reservaba.
+
+Reporte por TO
+--------------
+El admin ve las agendas de todas las TO juntas, asi que su PDF no coincidia
+con la agenda de ninguna, y eso hacia imposible verificar el reporte contra la
+pantalla. Ahora puede elegir una TO y el PDF trae solo esa, con el nombre en
+el titulo. Sin elegir ninguna sigue trayendo todas, como antes.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01EjnuJtuDoQQ273ZJ4WFYew
+---
+ src/app/api/reporte-turnos/route.tsx  | 16 +++++--
+ src/app/panel/admin/equipo/actions.ts | 61 +++++++++++++++++++++++++++
+ src/app/panel/admin/equipo/page.tsx   | 42 +++++++++++++++++-
+ src/app/panel/to/reportes/page.tsx    | 59 ++++++++++++++++++++++++--
+ src/lib/version.ts                    |  2 +-
+ 5 files changed, 171 insertions(+), 9 deletions(-)
+
+diff --git a/src/app/api/reporte-turnos/route.tsx b/src/app/api/reporte-turnos/route.tsx
+index 2da63a2..b99b72f 100644
+--- a/src/app/api/reporte-turnos/route.tsx
++++ b/src/app/api/reporte-turnos/route.tsx
+@@ -21,6 +21,9 @@ export async function GET(request: NextRequest) {
+   }
+ 
+   const rango = request.nextUrl.searchParams.get("rango") === "semana" ? "semana" : "dia";
++  // El admin ve las agendas de todas las TO juntas, y así el PDF no se puede
++  // contrastar contra la agenda de ninguna. Con `to` se limita a una sola.
++  const toPedida = request.nextUrl.searchParams.get("to") || "";
+ 
+   // La semana es la del calendario, de lunes a sábado, igual que la agenda:
+   // pedir "la semana" y recibir los próximos siete días corridos hacía que el
+@@ -39,13 +42,17 @@ export async function GET(request: NextRequest) {
+   // las series que empezaron antes del corte —no sólo las que arrancan dentro
+   // del rango— y recién después se las expande. Filtrar por `fecha` acá era
+   // lo que dejaba afuera a todo paciente semanal cargado en otra semana.
+-  const { data: turnosRaw } = await supabase
++  let consulta = supabase
+     .from("turnos")
+     .select(
+       "id, fecha, hora, estado, modalidad, frecuencia, fecha_fin, duracion_minutos, paciente_id, pacientes(nombre), tos(nombre)"
+     )
+     .lte("fecha", hasta);
+ 
++  if (toPedida) consulta = consulta.eq("to_id", toPedida);
++
++  const { data: turnosRaw } = await consulta;
++
+   const series: Turno[] = (turnosRaw ?? []).map((t) => ({
+     id: t.id,
+     fecha: t.fecha,
+@@ -92,10 +99,13 @@ export async function GET(request: NextRequest) {
+ 
+   // El título dice el rango cubierto: sin eso no hay forma de saber, mirando
+   // el papel, qué días entraron en el reporte.
++  // Si se filtró por una TO, su nombre va en el título: una hoja impresa sin
++  // eso no dice de quién es la agenda.
++  const toNombre = toPedida ? (datos[0]?.toNombre ?? "") : "";
+   const titulo =
+-    rango === "semana"
++    (rango === "semana"
+       ? `Reporte de turnos — semana del ${formatoCorto(desde)} al ${formatoCorto(hasta)}`
+-      : `Reporte de turnos — ${formatoCorto(hoy)}`;
++      : `Reporte de turnos — ${formatoCorto(hoy)}`) + (toNombre ? ` — ${toNombre}` : "");
+ 
+   await registrarAuditoria("exportacion", `Reporte de turnos (${rango}) — ${datos.length} turnos`);
+   const buffer = await renderToBuffer(
+diff --git a/src/app/panel/admin/equipo/actions.ts b/src/app/panel/admin/equipo/actions.ts
+index 1a684db..ee612e1 100644
+--- a/src/app/panel/admin/equipo/actions.ts
++++ b/src/app/panel/admin/equipo/actions.ts
+@@ -104,6 +104,67 @@ export async function cambiarEstadoTo(formData: FormData) {
+   revalidatePath("/panel/admin/equipo");
+ }
+ 
++// Pasa todo lo que está a nombre de una TO a otra: pacientes, turnos, notas
++// de evolución y facturas. Es el paso previo a borrar una TO duplicada o que
++// deja el consultorio — sin esto, lo único posible es la baja lógica, porque
++// borrar una TO con historia clínica detrás está bloqueado a propósito.
++//
++// El número de registro de los pacientes NO cambia: se generó con la letra de
++// la TO que los dio de alta y es el identificador de su historia clínica. Un
++// paciente reasignado conserva el suyo, como en cualquier archivo en papel.
++export async function reasignarPacientes(formData: FormData) {
++  await requireRole("admin");
++  const supabase = await createClient();
++
++  const origen_to_id = String(formData.get("origen_to_id"));
++  const destino_to_id = String(formData.get("destino_to_id") || "");
++
++  if (!destino_to_id) throw new Error("Elegí a qué TO pasan los pacientes.");
++  if (origen_to_id === destino_to_id) {
++    throw new Error("La TO que entrega y la que recibe son la misma.");
++  }
++
++  const { data: tos } = await supabase
++    .from("tos")
++    .select("id, nombre")
++    .in("id", [origen_to_id, destino_to_id]);
++
++  const nombre = (id: string) => (tos ?? []).find((t) => t.id === id)?.nombre ?? id;
++
++  if ((tos ?? []).length !== 2) {
++    throw new Error("Alguna de las dos TO ya no existe.");
++  }
++
++  const movimientos = [
++    { tabla: "pacientes", columna: "to_asignada_id", etiqueta: "pacientes" },
++    { tabla: "turnos", columna: "to_id", etiqueta: "turnos" },
++    { tabla: "notas_evolucion", columna: "to_id", etiqueta: "notas de evolución" },
++    { tabla: "facturas", columna: "to_id", etiqueta: "facturas" },
++  ];
++
++  const movidos: string[] = [];
++  for (const m of movimientos) {
++    const { data, error } = await supabase
++      .from(m.tabla)
++      .update({ [m.columna]: destino_to_id })
++      .eq(m.columna, origen_to_id)
++      .select("id");
++
++    if (error) throw new Error(`No se pudieron mover los ${m.etiqueta}: ${error.message}`);
++    if (data?.length) movidos.push(`${data.length} ${m.etiqueta}`);
++  }
++
++  // Los bloqueos de agenda no se mueven: son las horas que esa persona se
++  // reservaba, no información del paciente. Se van con ella al borrarla.
++  await registrarAuditoria(
++    "reasignacion_to",
++    `${nombre(origen_to_id)} → ${nombre(destino_to_id)}: ${movidos.join(", ") || "no había nada que mover"}`
++  );
++
++  revalidatePath("/panel/admin/equipo");
++  revalidatePath("/panel/admin/pacientes");
++}
++
+ // Borrado real de una TO, para sacar del sistema una cargada por error o de
+ // prueba. Distinto de la baja: la baja la deja archivada y se puede revertir.
+ //
+diff --git a/src/app/panel/admin/equipo/page.tsx b/src/app/panel/admin/equipo/page.tsx
+index b2d4795..45bb48f 100644
+--- a/src/app/panel/admin/equipo/page.tsx
++++ b/src/app/panel/admin/equipo/page.tsx
+@@ -4,7 +4,7 @@ import { Card } from "@/components/ui/Card";
+ import { Button } from "@/components/ui/Button";
+ import { ResetearClaveButton } from "@/components/ResetearClaveButton";
+ import { BotonConfirmar } from "@/components/ui/BotonConfirmar";
+-import { crearTo, actualizarTo, cambiarEstadoTo, borrarTo, subirFotoTo } from "./actions";
++import { crearTo, actualizarTo, cambiarEstadoTo, borrarTo, reasignarPacientes, subirFotoTo } from "./actions";
+ 
+ function iniciales(nombre: string) {
+   return nombre
+@@ -191,6 +191,46 @@ export default async function EquipoTo({
+               </form>
+             </details>
+ 
++            {/* Reasignar: el paso previo obligado para poder borrar una TO
++                duplicada o que deja el consultorio. Mientras tenga pacientes
++                o turnos a su nombre, el borrado se niega. */}
++            {tosConFoto.length > 1 && (
++              <details className="mt-2">
++                <summary className="cursor-pointer text-xs font-semibold text-blue-mid">
++                  Pasar sus pacientes a otra TO
++                </summary>
++                <form action={reasignarPacientes} className="mt-2 grid gap-2">
++                  <input type="hidden" name="origen_to_id" value={t.id} />
++                  <select
++                    name="destino_to_id"
++                    defaultValue=""
++                    className="rounded-xl border border-black/10 px-3 py-2 text-sm outline-blue-mid"
++                  >
++                    <option value="">Elegí la TO que los recibe...</option>
++                    {tosConFoto
++                      .filter((otra) => otra.id !== t.id)
++                      .map((otra) => (
++                        <option key={otra.id} value={otra.id}>
++                          {otra.nombre}
++                        </option>
++                      ))}
++                  </select>
++                  <p className="text-xs text-foreground/60">
++                    Se mueven sus pacientes, turnos, notas de evolución y
++                    facturas. El Nº de registro de cada paciente no cambia:
++                    identifica su historia clínica.
++                  </p>
++                  <BotonConfirmar
++                    confirmacion={`¿Pasar todos los pacientes y turnos de ${t.nombre} a la TO elegida?`}
++                    enCurso="Moviendo..."
++                    className="justify-self-start text-xs font-semibold text-blue-mid hover:underline"
++                  >
++                    Mover todo
++                  </BotonConfirmar>
++                </form>
++              </details>
++            )}
++
+             <div className="mt-2 flex flex-wrap items-center gap-4">
+               <form action={cambiarEstadoTo}>
+                 <input type="hidden" name="to_id" value={t.id} />
+diff --git a/src/app/panel/to/reportes/page.tsx b/src/app/panel/to/reportes/page.tsx
+index 00defe7..91f80e7 100644
+--- a/src/app/panel/to/reportes/page.tsx
++++ b/src/app/panel/to/reportes/page.tsx
+@@ -1,19 +1,70 @@
++import Link from "next/link";
+ import { requireRole } from "@/lib/auth";
++import { createClient } from "@/lib/supabase/server";
+ import { Card } from "@/components/ui/Card";
+ import { FormularioReporteSeguimiento } from "@/components/FormularioReporteSeguimiento";
+ 
+-export default async function Reportes() {
+-  await requireRole("to", "admin");
++export default async function Reportes({
++  searchParams,
++}: {
++  searchParams: Promise<{ to?: string }>;
++}) {
++  const usuario = await requireRole("to", "admin");
++  const { to } = await searchParams;
++
++  // El admin ve las agendas de todas las TO juntas: útil para una mirada
++  // general, inservible para contrastar contra la agenda de una. Por eso
++  // puede elegir una y que el PDF traiga sólo esa.
++  const esAdmin = usuario.rol === "admin";
++  const supabase = await createClient();
++  const { data: tos } = esAdmin
++    ? await supabase.from("tos").select("id, nombre").eq("activo", true).order("nombre")
++    : { data: [] };
++
++  const toElegida = (tos ?? []).find((t) => t.id === to);
++  const filtro = toElegida ? `&to=${toElegida.id}` : "";
+ 
+   return (
+     <div className="max-w-2xl">
+       <h1 className="text-2xl font-extrabold text-green-dark">Reportes de turnos</h1>
+ 
++      {esAdmin && (tos ?? []).length > 0 && (
++        <div className="mt-4">
++          <p className="text-sm font-semibold text-foreground/70">Agenda de:</p>
++          <div className="mt-2 flex flex-wrap gap-1 text-xs">
++            <Link
++              href="/panel/admin/reportes"
++              className={`rounded-full px-3 py-1.5 font-semibold ${
++                toElegida ? "border border-black/10" : "bg-green-mid text-white"
++              }`}
++            >
++              Todas
++            </Link>
++            {(tos ?? []).map((t) => (
++              <Link
++                key={t.id}
++                href={`/panel/admin/reportes?to=${t.id}`}
++                className={`rounded-full px-3 py-1.5 font-semibold ${
++                  t.id === toElegida?.id ? "bg-green-mid text-white" : "border border-black/10"
++                }`}
++              >
++                {t.nombre}
++              </Link>
++            ))}
++          </div>
++          <p className="mt-2 text-xs text-foreground/60">
++            {toElegida
++              ? `Los PDF de abajo van a traer sólo los turnos de ${toElegida.nombre}.`
++              : "Los PDF de abajo traen los turnos de todas las TO juntos."}
++          </p>
++        </div>
++      )}
++
+       <div className="mt-6 grid gap-4 sm:grid-cols-2">
+         <Card>
+           <p className="font-bold text-green-dark">Turnos de hoy</p>
+           <a
+-            href="/api/reporte-turnos?rango=dia"
++            href={`/api/reporte-turnos?rango=dia${filtro}`}
+             className="mt-3 inline-block rounded-full bg-green-mid px-5 py-2 font-bold text-white hover:bg-green-dark"
+           >
+             Descargar PDF
+@@ -25,7 +76,7 @@ export default async function Reportes() {
+             De lunes a sábado, la semana en curso.
+           </p>
+           <a
+-            href="/api/reporte-turnos?rango=semana"
++            href={`/api/reporte-turnos?rango=semana${filtro}`}
+             className="mt-3 inline-block rounded-full bg-green-mid px-5 py-2 font-bold text-white hover:bg-green-dark"
+           >
+             Descargar PDF
+diff --git a/src/lib/version.ts b/src/lib/version.ts
+index c50fa4e..05d79bd 100644
+--- a/src/lib/version.ts
++++ b/src/lib/version.ts
+@@ -1,3 +1,3 @@
+ // Version del sistema. Se muestra arriba a la derecha en el panel para
+ // poder confirmar de un vistazo que el despliegue tomo el codigo nuevo.
+-export const VERSION = "V013";
++export const VERSION = "V014";
+-- 
+2.43.0
+

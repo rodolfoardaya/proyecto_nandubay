@@ -1,0 +1,191 @@
+From 9519617a780f14c706b0921e01d2c59266b59bed Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Fri, 25 Sep 2026 14:01:47 +0000
+Subject: [PATCH] v018: subir un PDF escaneado ya no choca contra el limite de
+ 1 MB
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Cargar un estudio en la historia de un paciente fallaba siempre. La causa no
+estaba en el codigo de la carga sino en la configuracion: Next limita el cuerpo
+de una Server Action a 1 MB por defecto, y next.config.ts seguia siendo el que
+genero create-next-app, sin tocar.
+
+Todas las subidas del sistema van por ese camino —estudios, fichas escaneadas,
+acuerdos firmados, facturas, fotos del equipo— asi que todas estaban topeadas
+igual. Ningun PDF escaneado entra en 1 MB: un estudio de pocas paginas pesa
+entre 3 y 10 MB.
+
+Habia ademas algo que volvia el sintoma enganoso: la lectura con IA de la
+planilla y de la factura no va por Server Action sino por fetch a un endpoint,
+que no tiene ese tope. El archivo se leia bien y fallaba recien al guardarlo,
+con lo que parecia un error caprichoso.
+
+El tope pasa a 16 MB, y la aplicacion rechaza por encima de 15 diciendo cuanto
+pesa el archivo y que hacer. El margen entre los dos numeros es a proposito:
+sin el, un archivo apenas pasado de medida choca contra Next antes de llegar al
+codigo y muere sin explicacion. El control se aplica en los tres lugares que
+suben, no solo en el que se reporto.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01EjnuJtuDoQQ273ZJ4WFYew
+---
+ next.config.ts                          | 16 +++++++++++++++-
+ src/app/panel/admin/equipo/actions.ts   |  3 +++
+ src/app/panel/to/facturacion/actions.ts |  3 +++
+ src/app/panel/to/pacientes/actions.ts   |  3 +++
+ src/components/DocumentosPaciente.tsx   |  5 +++--
+ src/lib/archivos.ts                     | 19 +++++++++++++++++++
+ src/lib/version.ts                      |  2 +-
+ 7 files changed, 47 insertions(+), 4 deletions(-)
+ create mode 100644 src/lib/archivos.ts
+
+diff --git a/next.config.ts b/next.config.ts
+index e9ffa30..4fa9aba 100644
+--- a/next.config.ts
++++ b/next.config.ts
+@@ -1,7 +1,21 @@
+ import type { NextConfig } from "next";
+ 
+ const nextConfig: NextConfig = {
+-  /* config options here */
++  experimental: {
++    serverActions: {
++      // Next limita el cuerpo de una Server Action a 1 MB. Todas las subidas del
++      // sistema van por ese camino —estudios, fichas escaneadas, acuerdos
++      // firmados, facturas, fotos— y ningún PDF escaneado entra en 1 MB: un
++      // estudio de pocas páginas pesa entre 3 y 10 MB. Con el tope por defecto
++      // la carga fallaba siempre, y encima sin decir por qué.
++      //
++      // El tope va un megabyte por encima del que aplica la aplicación
++      // (MAXIMO_ARCHIVO_MB), a propósito: así un archivo apenas pasado de la
++      // medida llega hasta el servidor y recibe un mensaje que se entiende, en
++      // vez de chocar contra el límite de Next y morir sin explicación.
++      bodySizeLimit: "16mb",
++    },
++  },
+ };
+ 
+ export default nextConfig;
+diff --git a/src/app/panel/admin/equipo/actions.ts b/src/app/panel/admin/equipo/actions.ts
+index ee612e1..0671484 100644
+--- a/src/app/panel/admin/equipo/actions.ts
++++ b/src/app/panel/admin/equipo/actions.ts
+@@ -6,6 +6,7 @@ import { requireRole } from "@/lib/auth";
+ import { createAdminClient } from "@/lib/supabase/admin";
+ import { createClient } from "@/lib/supabase/server";
+ import { registrarAuditoria } from "@/lib/auditoria";
++import { excedeElMaximo, mensajeArchivoGrande } from "@/lib/archivos";
+ 
+ // Sin caracteres que se confundan al dictarla o anotarla (O/0, I/1, l).
+ function generarClaveProvisoria(): string {
+@@ -241,6 +242,8 @@ export async function subirFotoTo(formData: FormData) {
+     throw new Error("No se seleccionó archivo");
+   }
+ 
++  if (excedeElMaximo(archivo.size)) throw new Error(mensajeArchivoGrande(archivo.size));
++
+   // Subir a Storage
+   const path = `tos/${to_id}/${Date.now()}-${archivo.name}`;
+   const { error: uploadError } = await supabase.storage
+diff --git a/src/app/panel/to/facturacion/actions.ts b/src/app/panel/to/facturacion/actions.ts
+index 98e61cc..6e782dc 100644
+--- a/src/app/panel/to/facturacion/actions.ts
++++ b/src/app/panel/to/facturacion/actions.ts
+@@ -3,6 +3,7 @@
+ import { revalidatePath } from "next/cache";
+ import { requireRole } from "@/lib/auth";
+ import { createClient } from "@/lib/supabase/server";
++import { excedeElMaximo, mensajeArchivoGrande } from "@/lib/archivos";
+ 
+ export async function cargarFactura(formData: FormData) {
+   const usuario = await requireRole("to", "admin");
+@@ -25,6 +26,8 @@ export async function cargarFactura(formData: FormData) {
+ 
+   let archivo_pdf_url: string | null = null;
+   if (archivo && archivo.size > 0) {
++    if (excedeElMaximo(archivo.size)) throw new Error(mensajeArchivoGrande(archivo.size));
++
+     const path = `${to_id}/${Date.now()}-${archivo.name}`;
+     const { error: uploadError } = await supabase.storage.from("facturas").upload(path, archivo);
+     if (uploadError) throw new Error(uploadError.message);
+diff --git a/src/app/panel/to/pacientes/actions.ts b/src/app/panel/to/pacientes/actions.ts
+index 2333240..95302e6 100644
+--- a/src/app/panel/to/pacientes/actions.ts
++++ b/src/app/panel/to/pacientes/actions.ts
+@@ -9,6 +9,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
+ import { SECCIONES_NINOS, SECCIONES_ADULTOS, CAMPOS_ACUERDO } from "@/lib/ficha-fields";
+ import { parseDatosFicha, parseObservaciones } from "@/lib/observaciones";
+ import { registrarAuditoria } from "@/lib/auditoria";
++import { excedeElMaximo, mensajeArchivoGrande } from "@/lib/archivos";
+ import { dniDeCuil, normalizarCuil } from "@/lib/paciente-datos";
+ 
+ // Sube una firma manuscrita (dataURL PNG del FirmaPad) al bucket privado
+@@ -42,6 +43,8 @@ async function subirArchivo(
+ ): Promise<string | null> {
+   if (!archivo || archivo.size === 0) return null;
+ 
++  if (excedeElMaximo(archivo.size)) throw new Error(mensajeArchivoGrande(archivo.size));
++
+   const path = `${carpeta}/${Date.now()}-${nombreSeguro(archivo.name)}`;
+   const { error } = await supabase.storage.from("documentos").upload(path, archivo, {
+     contentType: archivo.type || "application/octet-stream",
+diff --git a/src/components/DocumentosPaciente.tsx b/src/components/DocumentosPaciente.tsx
+index 67314bf..25538bf 100644
+--- a/src/components/DocumentosPaciente.tsx
++++ b/src/components/DocumentosPaciente.tsx
+@@ -1,5 +1,5 @@
+-import { Button } from "@/components/ui/Button";
+ import { BotonEnvio } from "@/components/ui/BotonEnvio";
++import { MAXIMO_ARCHIVO_MB } from "@/lib/archivos";
+ import {
+   subirDocumentoPaciente,
+   archivarDocumentoPaciente,
+@@ -131,7 +131,8 @@ export function DocumentosPaciente({
+               className="rounded-xl border border-black/10 px-4 py-2.5 text-sm"
+             />
+             <p className="text-xs text-foreground/50">
+-              PDF o foto. Queda guardado en la historia clínica del paciente.
++              PDF o foto, hasta {MAXIMO_ARCHIVO_MB} MB. Queda guardado en la
++              historia clínica del paciente.
+             </p>
+             <BotonEnvio variant="secondary" enCurso="Subiendo..." className="justify-self-start">
+               Cargar documento
+diff --git a/src/lib/archivos.ts b/src/lib/archivos.ts
+new file mode 100644
+index 0000000..1d8ba3c
+--- /dev/null
++++ b/src/lib/archivos.ts
+@@ -0,0 +1,19 @@
++// Tamaño máximo de cualquier archivo que suba el sistema.
++//
++// Tiene que quedar por debajo del `serverActions.bodySizeLimit` de
++// next.config.ts: ese margen es lo que permite que un archivo apenas pasado de
++// medida llegue hasta el servidor y reciba un mensaje que se entiende, en vez
++// de chocar contra el límite de Next y morir sin explicación.
++export const MAXIMO_ARCHIVO_MB = 15;
++
++export function excedeElMaximo(bytes: number): boolean {
++  return bytes > MAXIMO_ARCHIVO_MB * 1024 * 1024;
++}
++
++export function mensajeArchivoGrande(bytes: number): string {
++  const pesa = (bytes / 1024 / 1024).toFixed(1);
++  return (
++    `El archivo pesa ${pesa} MB y el máximo es ${MAXIMO_ARCHIVO_MB} MB. ` +
++    "Si es un escaneo, volvé a escanearlo en menor calidad o dividilo en partes."
++  );
++}
+diff --git a/src/lib/version.ts b/src/lib/version.ts
+index 5f3668a..2c1af5c 100644
+--- a/src/lib/version.ts
++++ b/src/lib/version.ts
+@@ -1,3 +1,3 @@
+ // Version del sistema. Se muestra arriba a la derecha en el panel para
+ // poder confirmar de un vistazo que el despliegue tomo el codigo nuevo.
+-export const VERSION = "V017";
++export const VERSION = "V018";
+-- 
+2.43.0
+

@@ -1,0 +1,63 @@
+From fcc81fc3970aea3513c55200ee96e8682084b6de Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Mon, 17 Aug 2026 22:36:16 +0000
+Subject: [PATCH 1/2] Sacar la configuracion de Vercel, que ya no se usa
+
+El sistema corre solo en el dominio de Hostinger. vercel.json declaraba el
+cron de recordatorios, pero ahi no lo lee nadie: Hostinger no interpreta ese
+archivo, asi que el aviso de turnos no se estaba disparando por si solo.
+
+Se elimina el archivo y la unica informacion que tenia (que esto corre cada
+hora y como) queda anotada en el propio endpoint, junto al comando para dar
+de alta el cron en el panel de Hostinger.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01EjnuJtuDoQQ273ZJ4WFYew
+---
+ src/app/api/cron/recordatorios/route.ts | 14 ++++++++++----
+ vercel.json                             |  8 --------
+ 2 files changed, 10 insertions(+), 12 deletions(-)
+ delete mode 100644 vercel.json
+
+diff --git a/src/app/api/cron/recordatorios/route.ts b/src/app/api/cron/recordatorios/route.ts
+index e0974f2..bac81b7 100644
+--- a/src/app/api/cron/recordatorios/route.ts
++++ b/src/app/api/cron/recordatorios/route.ts
+@@ -2,10 +2,16 @@ import { NextRequest, NextResponse } from "next/server";
+ import { createAdminClient } from "@/lib/supabase/admin";
+ import { enviarRecordatorioWhatsApp } from "@/lib/whatsapp";
+ 
+-// Pensado para ejecutarse una vez por hora vía un scheduler externo
+-// (Vercel Cron u otro), protegido con CRON_SECRET. Busca turnos que caen
+-// dentro de las próximas 24-25hs, confirmados, sin recordatorio enviado
+-// todavía, y les manda un WhatsApp al familiar del paciente.
++// Busca turnos que caen dentro de las próximas 24-25hs, confirmados, sin
++// recordatorio enviado todavía, y les manda un WhatsApp al familiar del
++// paciente. Protegido con CRON_SECRET.
++//
++// La ventana es de una hora, así que esto tiene que correr una vez por hora
++// o los turnos de las horas salteadas se quedan sin aviso. No hay scheduler
++// dentro de la app: se da de alta en el panel de Hostinger, en Cron Jobs,
++// con schedule "0 * * * *" y el comando:
++//
++//   curl -s "https://DOMINIO/api/cron/recordatorios?secret=EL_CRON_SECRET"
+ export async function GET(request: NextRequest) {
+   const secret = request.nextUrl.searchParams.get("secret");
+   if (!process.env.CRON_SECRET || secret !== process.env.CRON_SECRET) {
+diff --git a/vercel.json b/vercel.json
+deleted file mode 100644
+index 161e5da..0000000
+--- a/vercel.json
++++ /dev/null
+@@ -1,8 +0,0 @@
+-{
+-  "crons": [
+-    {
+-      "path": "/api/cron/recordatorios?secret=REEMPLAZAR_CON_CRON_SECRET",
+-      "schedule": "0 * * * *"
+-    }
+-  ]
+-}
+-- 
+2.43.0
+

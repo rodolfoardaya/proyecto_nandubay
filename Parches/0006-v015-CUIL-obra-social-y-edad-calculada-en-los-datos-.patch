@@ -1,0 +1,810 @@
+From 169bbf150792fff0dc6010cc820bdf2f2d9acfd0 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Fri, 25 Sep 2026 12:23:13 +0000
+Subject: [PATCH] v015: CUIL, obra social y edad calculada en los datos del
+ paciente
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Obra social
+-----------
+No existia como dato del paciente. Solo habia un estado de pago 'obra_social'
+en el turno, que dice como se cobra esa sesion, no a que financiadora
+pertenece la familia. Ahora es una columna propia, se carga en el alta y la
+corrige el admin.
+
+CUIL en lugar de DNI
+--------------------
+El campo pasa a ser el CUIL, con formato XX-XXXXXXXX-X. Acepta que lo tipeen
+con guiones, con puntos o los once digitos seguidos, y lo guarda siempre igual.
+
+El DNI se sigue guardando aparte, derivado de los ocho digitos del medio. No
+es redundancia: de el dependen la busqueda y el indice unico que impide cargar
+dos veces al mismo paciente, y los pacientes ya cargados tienen DNI pero
+todavia no CUIL. Manteniendo los dos, lo viejo sigue funcionando y lo nuevo se
+completa cuando haya tiempo. Donde falta el CUIL se muestra el DNI.
+
+La busqueda acepta las dos formas: si pegan el CUIL entero, se le sacan el
+prefijo y el verificador y se busca por el DNI igual.
+
+Edad
+----
+No se carga: sale de la fecha de nacimiento y del dia en que se mira la ficha,
+y aparece recien cuando hay fecha cargada. Se da en años y meses.
+
+La ficha impresa ya calculaba una edad, solo en años y construyendo un Date a
+partir del texto de la fecha, lo que corre el dia segun la zona horaria. Esa
+version se reemplaza por el calculo compartido, que trabaja sobre el texto
+AAAA-MM-DD y no se mueve. Contempla el mes cumplido de quien nacio un 31 y es
+mirado en un mes que no tiene 31.
+
+Los tres datos aparecen tambien en lo impreso: ficha de inicio, evolucion,
+historia clinica completa y la cabecera de todas las hojas.
+
+Requiere aplicar supabase/migrations/0020_paciente_cuil_obra_social.sql.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01EjnuJtuDoQQ273ZJ4WFYew
+---
+ src/app/api/backup/route.tsx                  |  4 +-
+ src/app/api/imprimir/acuerdo/route.tsx        |  2 +-
+ src/app/api/imprimir/evolucion/route.tsx      |  4 +-
+ src/app/api/imprimir/ficha/route.tsx          |  4 +-
+ src/app/panel/admin/pacientes/actions.ts      | 26 +++++-
+ src/app/panel/admin/pacientes/page.tsx        |  2 +-
+ src/app/panel/to/pacientes/[id]/page.tsx      | 41 +++++++--
+ src/app/panel/to/pacientes/actions.ts         | 20 ++++-
+ src/app/panel/to/pacientes/page.tsx           | 10 ++-
+ src/components/BuscadorPacientes.tsx          |  4 +-
+ src/components/NuevoPacienteForm.tsx          | 37 ++++++--
+ src/components/TablaPacientes.tsx             | 10 ++-
+ src/lib/paciente-datos.ts                     | 85 +++++++++++++++++++
+ src/lib/pdf/EvolucionDoc.tsx                  |  9 +-
+ src/lib/pdf/FichaInicioDoc.tsx                | 19 ++---
+ src/lib/pdf/HistoriaClinicaDoc.tsx            |  8 +-
+ src/lib/pdf/comunes.tsx                       |  7 +-
+ src/lib/version.ts                            |  2 +-
+ .../0020_paciente_cuil_obra_social.sql        | 19 +++++
+ 19 files changed, 265 insertions(+), 48 deletions(-)
+ create mode 100644 src/lib/paciente-datos.ts
+ create mode 100644 supabase/migrations/0020_paciente_cuil_obra_social.sql
+
+diff --git a/src/app/api/backup/route.tsx b/src/app/api/backup/route.tsx
+index ff208b2..4559182 100644
+--- a/src/app/api/backup/route.tsx
++++ b/src/app/api/backup/route.tsx
+@@ -19,7 +19,7 @@ export async function GET(request: NextRequest) {
+   // RLS ya restringe: una TO solo ve sus propios pacientes, Admin ve todos.
+   let query = supabase
+     .from("pacientes")
+-    .select("id, nombre, numero_registro, tipo, fecha_nacimiento, dni")
++    .select("id, nombre, numero_registro, tipo, fecha_nacimiento, dni, cuil, obra_social")
+     .order("nombre");
+ 
+   if (pacienteId) {
+@@ -64,6 +64,8 @@ export async function GET(request: NextRequest) {
+       tipo: p.tipo,
+       fecha_nacimiento: p.fecha_nacimiento,
+       dni: p.dni,
++      cuil: p.cuil,
++      obra_social: p.obra_social,
+       ficha: ficha as PacienteBackup["ficha"],
+       acuerdo: acuerdo as PacienteBackup["acuerdo"],
+       evolucion: evolucion ?? [],
+diff --git a/src/app/api/imprimir/acuerdo/route.tsx b/src/app/api/imprimir/acuerdo/route.tsx
+index 2e56949..00feb7c 100644
+--- a/src/app/api/imprimir/acuerdo/route.tsx
++++ b/src/app/api/imprimir/acuerdo/route.tsx
+@@ -25,7 +25,7 @@ export async function GET(request: NextRequest) {
+ 
+   const { data: paciente } = await supabase
+     .from("pacientes")
+-    .select("nombre, numero_registro, tipo, dni, tos(nombre)")
++    .select("nombre, numero_registro, tipo, dni, cuil, tos(nombre)")
+     .eq("id", pacienteId)
+     .maybeSingle();
+ 
+diff --git a/src/app/api/imprimir/evolucion/route.tsx b/src/app/api/imprimir/evolucion/route.tsx
+index 6ff600e..e4ea656 100644
+--- a/src/app/api/imprimir/evolucion/route.tsx
++++ b/src/app/api/imprimir/evolucion/route.tsx
+@@ -23,7 +23,7 @@ export async function GET(request: NextRequest) {
+ 
+   const { data: paciente } = await supabase
+     .from("pacientes")
+-    .select("nombre, numero_registro, tipo, dni, fecha_nacimiento, tos(nombre)")
++    .select("nombre, numero_registro, tipo, dni, cuil, obra_social, fecha_nacimiento, tos(nombre)")
+     .eq("id", pacienteId)
+     .maybeSingle();
+ 
+@@ -52,6 +52,8 @@ export async function GET(request: NextRequest) {
+         numero_registro: paciente.numero_registro,
+         tipo: paciente.tipo,
+         dni: paciente.dni,
++        cuil: paciente.cuil,
++        obra_social: paciente.obra_social,
+         fecha_nacimiento: paciente.fecha_nacimiento,
+         to_nombre: toNombre ?? null,
+       }}
+diff --git a/src/app/api/imprimir/ficha/route.tsx b/src/app/api/imprimir/ficha/route.tsx
+index 814b17a..0393ff8 100644
+--- a/src/app/api/imprimir/ficha/route.tsx
++++ b/src/app/api/imprimir/ficha/route.tsx
+@@ -24,7 +24,7 @@ export async function GET(request: NextRequest) {
+ 
+   const { data: paciente } = await supabase
+     .from("pacientes")
+-    .select("nombre, numero_registro, tipo, dni, fecha_nacimiento, tos(nombre)")
++    .select("nombre, numero_registro, tipo, dni, cuil, obra_social, fecha_nacimiento, tos(nombre)")
+     .eq("id", pacienteId)
+     .maybeSingle();
+ 
+@@ -55,6 +55,8 @@ export async function GET(request: NextRequest) {
+         numero_registro: paciente.numero_registro,
+         tipo: paciente.tipo,
+         dni: paciente.dni,
++        cuil: paciente.cuil,
++        obra_social: paciente.obra_social,
+         fecha_nacimiento: paciente.fecha_nacimiento,
+         to_nombre: toNombre ?? null,
+       }}
+diff --git a/src/app/panel/admin/pacientes/actions.ts b/src/app/panel/admin/pacientes/actions.ts
+index 5161be3..4ce7f27 100644
+--- a/src/app/panel/admin/pacientes/actions.ts
++++ b/src/app/panel/admin/pacientes/actions.ts
+@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
+ import { requireRole } from "@/lib/auth";
+ import { createClient } from "@/lib/supabase/server";
+ import { registrarAuditoria } from "@/lib/auditoria";
++import { dniDeCuil, normalizarCuil } from "@/lib/paciente-datos";
+ 
+ // Corrección de los datos personales del paciente: lo que se cargó mal en el
+ // alta y hasta ahora sólo se podía mirar. El número de registro no se toca —
+@@ -21,18 +22,35 @@ export async function actualizarDatosPaciente(formData: FormData) {
+   const nombre = String(formData.get("nombre") || "").trim();
+   const tipo = String(formData.get("tipo") || "");
+   const fecha_nacimiento = String(formData.get("fecha_nacimiento") || "") || null;
+-  // Igual que en el alta: sólo dígitos, para que la comparación con lo ya
+-  // cargado no falle por un punto de miles de diferencia.
+-  const dni = String(formData.get("dni") || "").replace(/\D/g, "") || null;
++  const obra_social = String(formData.get("obra_social") || "").trim() || null;
++  const cuilCrudo = String(formData.get("cuil") || "").trim();
+ 
+   if (!nombre) throw new Error("El apellido y nombre no puede quedar vacío.");
+   if (tipo !== "nino" && tipo !== "adulto") {
+     throw new Error("El tipo de ficha tiene que ser niño o adulto.");
+   }
+ 
++  const cuil = cuilCrudo ? normalizarCuil(cuilCrudo) : null;
++  if (cuilCrudo && !cuil) {
++    throw new Error(
++      "El CUIL tiene que tener 11 dígitos, con el formato XX-XXXXXXXX-X."
++    );
++  }
++
++  // El DNI se deriva del CUIL, no se carga aparte: de él dependen la búsqueda
++  // y el índice que impide cargar dos veces al mismo paciente. Si no se cargó
++  // un CUIL, el DNI que ya estuviera guardado se deja como está.
++  const cambios: Record<string, string | null> = { nombre, tipo, fecha_nacimiento, obra_social };
++  if (cuil) {
++    cambios.cuil = cuil;
++    cambios.dni = dniDeCuil(cuil);
++  } else if (!cuilCrudo) {
++    cambios.cuil = null;
++  }
++
+   const { error } = await supabase
+     .from("pacientes")
+-    .update({ nombre, tipo, fecha_nacimiento, dni })
++    .update(cambios)
+     .eq("id", paciente_id);
+ 
+   if (error) {
+diff --git a/src/app/panel/admin/pacientes/page.tsx b/src/app/panel/admin/pacientes/page.tsx
+index e6a4d4b..19f4a1c 100644
+--- a/src/app/panel/admin/pacientes/page.tsx
++++ b/src/app/panel/admin/pacientes/page.tsx
+@@ -13,7 +13,7 @@ export default async function ListaPacientesAdmin() {
+   const { data: tos } = await supabase.from("tos").select("id, nombre, letra").order("nombre");
+   const { data: pacientes } = await supabase
+     .from("pacientes")
+-    .select("id, numero_registro, nombre, dni, tipo, to_asignada_id, activo, baja_at, baja_motivo")
++    .select("id, numero_registro, nombre, dni, cuil, tipo, to_asignada_id, activo, baja_at, baja_motivo")
+     .order("numero_registro");
+ 
+   const dadosDeBaja = (pacientes ?? []).filter((p) => p.activo === false);
+diff --git a/src/app/panel/to/pacientes/[id]/page.tsx b/src/app/panel/to/pacientes/[id]/page.tsx
+index f129001..a9d1e8c 100644
+--- a/src/app/panel/to/pacientes/[id]/page.tsx
++++ b/src/app/panel/to/pacientes/[id]/page.tsx
+@@ -7,6 +7,7 @@ import { calcularDatosFaltantes } from "@/lib/datos-faltantes";
+ import { SECCIONES_PACIENTE } from "@/lib/paciente-vista";
+ import { BotonEnvio } from "@/components/ui/BotonEnvio";
+ import { actualizarDatosPaciente } from "@/app/panel/admin/pacientes/actions";
++import { documentoVisible, edadDe } from "@/lib/paciente-datos";
+ 
+ // Portada del paciente: sus datos y el acceso a cada parte de la historia.
+ export default async function PortadaPaciente({
+@@ -20,7 +21,7 @@ export default async function PortadaPaciente({
+ 
+   const { data: paciente } = await supabase
+     .from("pacientes")
+-    .select("id, nombre, numero_registro, tipo, fecha_nacimiento, dni, tos(nombre)")
++    .select("id, nombre, numero_registro, tipo, fecha_nacimiento, dni, cuil, obra_social, tos(nombre)")
+     .eq("id", id)
+     .maybeSingle();
+ 
+@@ -42,6 +43,10 @@ export default async function PortadaPaciente({
+     ultimaEvolucion: evolucion?.[0]?.fecha ?? null,
+   });
+ 
++  // La edad no se carga: sale de la fecha de nacimiento y del día de hoy, y
++  // por eso no aparece hasta que la fecha esté cargada.
++  const edad = edadDe(paciente.fecha_nacimiento);
++
+   const base = `/panel/${usuario.rol}/pacientes/${id}`;
+   const dato = (etiqueta: string, valor: string | null | undefined) =>
+     valor ? (
+@@ -58,8 +63,10 @@ export default async function PortadaPaciente({
+         <dl className="mt-3 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+           {dato("Apellido y nombre", paciente.nombre)}
+           {dato("Nº de registro", paciente.numero_registro)}
+-          {dato("DNI", paciente.dni)}
++          {dato("CUIL", documentoVisible(paciente.cuil, paciente.dni))}
+           {dato("Fecha de nacimiento", paciente.fecha_nacimiento)}
++          {dato("Edad", edad?.texto)}
++          {dato("Obra social", paciente.obra_social)}
+           {dato("Tipo de ficha", paciente.tipo)}
+           {/* @ts-expect-error relación anidada */}
+           {dato("TO a cargo", paciente.tos?.nombre)}
+@@ -85,13 +92,31 @@ export default async function PortadaPaciente({
+                 />
+               </label>
+               <label className="text-xs font-semibold text-foreground/70">
+-                DNI
++                CUIL
+                 <input
+-                  name="dni"
+-                  defaultValue={paciente.dni ?? ""}
++                  name="cuil"
++                  defaultValue={paciente.cuil ?? ""}
++                  placeholder="XX-XXXXXXXX-X"
+                   inputMode="numeric"
+                   className="mt-1 w-full rounded-xl border border-black/10 px-3 py-2 text-sm outline-blue-mid"
+                 />
++                {/* Los cargados antes de que existiera el campo tienen el DNI
++                    suelto: se muestra para poder completar el CUIL sin ir a
++                    buscar el documento. */}
++                {!paciente.cuil && paciente.dni && (
++                  <span className="mt-1 block font-normal text-foreground/60">
++                    DNI cargado: {paciente.dni}
++                  </span>
++                )}
++              </label>
++              <label className="text-xs font-semibold text-foreground/70">
++                Obra social
++                <input
++                  name="obra_social"
++                  defaultValue={paciente.obra_social ?? ""}
++                  placeholder="Obra social o prepaga"
++                  className="mt-1 w-full rounded-xl border border-black/10 px-3 py-2 text-sm outline-blue-mid"
++                />
+               </label>
+               <label className="text-xs font-semibold text-foreground/70">
+                 Fecha de nacimiento
+@@ -115,8 +140,10 @@ export default async function PortadaPaciente({
+               </label>
+               <p className="text-xs text-foreground/60 sm:col-span-2">
+                 El Nº de registro no se modifica: identifica la historia
+-                clínica. Cambiar el tipo de ficha cambia qué campos se muestran
+-                en la ficha de inicio; lo ya cargado no se borra.
++                clínica. La edad tampoco se carga, se calcula sola a partir de
++                la fecha de nacimiento. Cambiar el tipo de ficha cambia qué
++                campos se muestran en la ficha de inicio; lo ya cargado no se
++                borra.
+               </p>
+               <BotonEnvio variant="secondary" className="justify-self-start sm:col-span-2">
+                 Guardar datos personales
+diff --git a/src/app/panel/to/pacientes/actions.ts b/src/app/panel/to/pacientes/actions.ts
+index 0f68616..dc4f3ac 100644
+--- a/src/app/panel/to/pacientes/actions.ts
++++ b/src/app/panel/to/pacientes/actions.ts
+@@ -9,6 +9,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
+ import { SECCIONES_NINOS, SECCIONES_ADULTOS, CAMPOS_ACUERDO } from "@/lib/ficha-fields";
+ import { parseDatosFicha, parseObservaciones } from "@/lib/observaciones";
+ import { registrarAuditoria } from "@/lib/auditoria";
++import { dniDeCuil, normalizarCuil } from "@/lib/paciente-datos";
+ 
+ // Sube una firma manuscrita (dataURL PNG del FirmaPad) al bucket privado
+ // "documentos" y devuelve la ruta guardada, o null si no se firmó nada.
+@@ -139,9 +140,20 @@ export async function crearPaciente(formData: FormData) {
+   const tipo = String(formData.get("tipo"));
+   const nombre = String(formData.get("nombre"));
+   const fecha_nacimiento = String(formData.get("fecha_nacimiento") || "") || null;
+-  // Se guarda solo con dígitos para que la comparación con lo ya cargado no
+-  // falle por un punto de miles de diferencia.
+-  const dni = String(formData.get("dni") || "").replace(/\D/g, "") || null;
++  const obra_social = String(formData.get("obra_social") || "").trim() || null;
++
++  const cuilCrudo = String(formData.get("cuil") || "").trim();
++  const cuil = cuilCrudo ? normalizarCuil(cuilCrudo) : null;
++  if (cuilCrudo && !cuil) {
++    throw new Error("El CUIL tiene que tener 11 dígitos, con el formato XX-XXXXXXXX-X.");
++  }
++
++  // El DNI sale del CUIL cuando está: es el que usan la búsqueda y el índice
++  // que impide cargar dos veces al mismo paciente. Si sólo se conoce el DNI
++  // —porque vino de una planilla— se guarda ese, sólo con dígitos, para que
++  // la comparación no falle por un punto de miles de diferencia.
++  const dni =
++    dniDeCuil(cuil) ?? (String(formData.get("dni") || "").replace(/\D/g, "") || null);
+ 
+   // Antes de crear nada se comprueba que el paciente no esté ya cargado. La
+   // búsqueda va con el cliente de servicio a propósito: si el duplicado está
+@@ -164,6 +176,8 @@ export async function crearPaciente(formData: FormData) {
+       nombre,
+       fecha_nacimiento,
+       dni,
++      cuil,
++      obra_social,
+       to_asignada_id: toAsignadaId,
+     })
+     .select("id")
+diff --git a/src/app/panel/to/pacientes/page.tsx b/src/app/panel/to/pacientes/page.tsx
+index ca7bef3..196c276 100644
+--- a/src/app/panel/to/pacientes/page.tsx
++++ b/src/app/panel/to/pacientes/page.tsx
+@@ -23,7 +23,7 @@ export default async function ListaPacientes({
+ 
+   let query = supabase
+     .from("pacientes")
+-    .select("id, numero_registro, nombre, dni, tipo")
++    .select("id, numero_registro, nombre, dni, cuil, tipo")
+     .eq("activo", true)
+     .order("numero_registro");
+ 
+@@ -40,7 +40,13 @@ export default async function ListaPacientes({
+   // uno solo no se busca (ver MINIMO_CRITERIOS).
+   if (buscando) {
+     if (criterios.nro) query = query.ilike("numero_registro", criterios.nro);
+-    if (criterios.dni) query = query.ilike("dni", `%${criterios.dni.replace(/\./g, "")}%`);
++    // Se busca por el DNI, que es lo que la gente recuerda. Si pegan el CUIL
++    // entero, se le sacan el prefijo y el verificador y se busca igual.
++    if (criterios.dni) {
++      const digitos = criterios.dni.replace(/\D/g, "");
++      const aBuscar = digitos.length === 11 ? digitos.slice(2, 10) : digitos || criterios.dni;
++      query = query.ilike("dni", `%${aBuscar}%`);
++    }
+     if (criterios.nombre) query = query.ilike("nombre", `%${criterios.nombre}%`);
+   }
+ 
+diff --git a/src/components/BuscadorPacientes.tsx b/src/components/BuscadorPacientes.tsx
+index b675997..28911df 100644
+--- a/src/components/BuscadorPacientes.tsx
++++ b/src/components/BuscadorPacientes.tsx
+@@ -39,7 +39,7 @@ export function BuscadorPacientes({
+     <form action={base} className="mt-4 rounded-2xl bg-white p-5 shadow-sm">
+       <p className="font-bold text-green-dark">Buscar una historia clínica</p>
+       <p className="mt-1 text-xs text-foreground/60">
+-        Buscá por número de registro, DNI o apellido y nombre.
++        Buscá por número de registro, DNI o CUIL, o apellido y nombre.
+       </p>
+       <div className="mt-3 grid gap-3 sm:grid-cols-3">
+         <label className="text-xs font-semibold text-foreground/70">
+@@ -48,7 +48,7 @@ export function BuscadorPacientes({
+         </label>
+         <label className="text-xs font-semibold text-foreground/70">
+           DNI
+-          <input name="dni" defaultValue={criterios.dni} placeholder="Sin puntos" className={`mt-1 w-full ${CAMPO}`} />
++          <input name="dni" defaultValue={criterios.dni} placeholder="DNI o CUIL, sin puntos" className={`mt-1 w-full ${CAMPO}`} />
+         </label>
+         <label className="text-xs font-semibold text-foreground/70">
+           Apellido y nombre
+diff --git a/src/components/NuevoPacienteForm.tsx b/src/components/NuevoPacienteForm.tsx
+index 1201d96..64561c1 100644
+--- a/src/components/NuevoPacienteForm.tsx
++++ b/src/components/NuevoPacienteForm.tsx
+@@ -24,10 +24,14 @@ export function NuevoPacienteForm({ tipo, secciones }: Props) {
+   // El apellido y el nombre se cargan por separado, como en la planilla en
+   // papel, pero se guardan juntos en `pacientes.nombre` (que es lo que ven
+   // los listados, ordenados por apellido).
++  // `dniLeido` no se tipea: es el DNI que pudo haber traído la planilla. Se
++  // conserva para no perderlo si todavía no se sabe el CUIL completo.
+   const [paciente, setPaciente] = useState({
+     apellido: "",
+     nombre: "",
+-    dni: "",
++    cuil: "",
++    dniLeido: "",
++    obra_social: "",
+     fecha_nacimiento: "",
+   });
+   const nombreCompleto = `${paciente.apellido} ${paciente.nombre}`.trim();
+@@ -74,7 +78,9 @@ export function NuevoPacienteForm({ tipo, secciones }: Props) {
+       setPaciente({
+         apellido: data.paciente?.apellido || "",
+         nombre: data.paciente?.nombre || "",
+-        dni: data.paciente?.dni || "",
++        cuil: "",
++        dniLeido: data.paciente?.dni || "",
++        obra_social: "",
+         fecha_nacimiento: data.paciente?.fecha_nacimiento || "",
+       });
+       setDatos(data.datos ?? {});
+@@ -198,15 +204,34 @@ export function NuevoPacienteForm({ tipo, secciones }: Props) {
+           onChange={(e) => setPaciente({ ...paciente, nombre: e.target.value.toUpperCase() })}
+           className="rounded-xl border border-black/10 px-4 py-3 outline-blue-mid"
+         />
++        {/* El DNI que pudo haber leído la planilla viaja igual: si todavía no
++            se sabe el CUIL completo, al menos el documento no se pierde. */}
++        <input type="hidden" name="dni" value={paciente.dniLeido} />
+         <input
+-          name="dni"
+-          placeholder="DNI"
+-          value={paciente.dni}
+-          onChange={(e) => setPaciente({ ...paciente, dni: e.target.value })}
++          name="cuil"
++          placeholder="CUIL (XX-XXXXXXXX-X)"
++          value={paciente.cuil}
++          onChange={(e) => setPaciente({ ...paciente, cuil: e.target.value })}
++          inputMode="numeric"
++          className="rounded-xl border border-black/10 px-4 py-3 outline-blue-mid"
++        />
++        {paciente.dniLeido && !paciente.cuil && (
++          <p className="text-xs text-foreground/60">
++            La planilla traía el DNI <b>{paciente.dniLeido}</b>. Completá el CUIL
++            si lo tenés a mano; son los mismos 8 dígitos, con el prefijo y el
++            verificador.
++          </p>
++        )}
++        <input
++          name="obra_social"
++          placeholder="Obra social o prepaga"
++          value={paciente.obra_social}
++          onChange={(e) => setPaciente({ ...paciente, obra_social: e.target.value })}
+           className="rounded-xl border border-black/10 px-4 py-3 outline-blue-mid"
+         />
+         <p className="text-xs text-foreground/50">
+           El número de registro (ej. A0001) lo asigna el sistema automáticamente al guardar.
++          La edad se calcula sola con la fecha de nacimiento.
+         </p>
+         <label className="text-sm font-semibold text-foreground/70">
+           Fecha de nacimiento
+diff --git a/src/components/TablaPacientes.tsx b/src/components/TablaPacientes.tsx
+index 97dda0c..39dbfa5 100644
+--- a/src/components/TablaPacientes.tsx
++++ b/src/components/TablaPacientes.tsx
+@@ -3,17 +3,19 @@
+ import Link from "next/link";
+ import { useState } from "react";
+ import { darDeBajaPaciente } from "@/app/panel/admin/pacientes/actions";
++import { documentoVisible } from "@/lib/paciente-datos";
+ 
+ type Paciente = {
+   id: string;
+   numero_registro: string;
+   nombre: string;
+   dni: string | null;
++  cuil?: string | null;
+   tipo: string;
+ };
+ 
+ // Listado tabular de pacientes ordenado por número de registro, con los
+-// datos principales a simple vista (apellido y nombre, DNI, tipo) y
++// datos principales a simple vista (apellido y nombre, CUIL, tipo) y
+ // selección para imprimir las planillas + historia clínica de varios a la
+ // vez (usa el mismo endpoint de backup en PDF).
+ export function TablaPacientes({
+@@ -82,7 +84,7 @@ export function TablaPacientes({
+               </th>
+               <th className="px-4 py-3">Nº</th>
+               <th className="px-4 py-3">Apellido y Nombre</th>
+-              <th className="px-4 py-3">DNI</th>
++              <th className="px-4 py-3">CUIL</th>
+               <th className="px-4 py-3">Tipo</th>
+               {mostrarBaja && <th className="px-4 py-3">Baja</th>}
+             </tr>
+@@ -108,7 +110,9 @@ export function TablaPacientes({
+                     {p.nombre}
+                   </Link>
+                 </td>
+-                <td className="px-4 py-3 text-foreground/70">{p.dni ?? "—"}</td>
++                <td className="px-4 py-3 text-foreground/70">
++                  {documentoVisible(p.cuil, p.dni) ?? "—"}
++                </td>
+                 <td className="px-4 py-3 capitalize text-foreground/70">{p.tipo}</td>
+                 {mostrarBaja && (
+                   <td className="px-4 py-3">
+diff --git a/src/lib/paciente-datos.ts b/src/lib/paciente-datos.ts
+new file mode 100644
+index 0000000..157d454
+--- /dev/null
++++ b/src/lib/paciente-datos.ts
+@@ -0,0 +1,85 @@
++// Datos identificatorios del paciente que no viven dentro de la ficha: el
++// CUIL y la edad.
++//
++// Las fechas se manejan como texto "AAAA-MM-DD" y no como objetos Date, por
++// la misma razón que en la agenda: al convertir de un lado a otro la zona
++// horaria corre el día, y una edad que cambia de valor según la hora a la que
++// se abra la ficha es un error que se ve.
++
++import { hoyIso } from "@/lib/agenda";
++
++// ── CUIL ───────────────────────────────────────────────────────────────────
++
++// El CUIL son 11 dígitos: 2 de prefijo, los 8 del DNI y 1 verificador.
++// Se guarda con guiones, que es como se escribe y como se lee en voz alta.
++//
++// Acepta lo que le tipeen —con guiones, con puntos, o los 11 dígitos
++// seguidos— y devuelve null si no llega a 11 dígitos, que es la única forma
++// de saber que está incompleto.
++export function normalizarCuil(entrada: string | null | undefined): string | null {
++  const digitos = (entrada ?? "").replace(/\D/g, "");
++  if (digitos.length !== 11) return null;
++  return `${digitos.slice(0, 2)}-${digitos.slice(2, 10)}-${digitos.slice(10)}`;
++}
++
++// Los 8 del medio. `dni` se sigue guardando aparte porque de él dependen el
++// índice antiduplicados y la búsqueda.
++export function dniDeCuil(cuil: string | null | undefined): string | null {
++  const digitos = (cuil ?? "").replace(/\D/g, "");
++  return digitos.length === 11 ? digitos.slice(2, 10) : null;
++}
++
++// Para mostrar: el CUIL si está, y si no el DNI suelto de los pacientes
++// cargados antes de que existiera este campo.
++export function documentoVisible(
++  cuil: string | null | undefined,
++  dni: string | null | undefined
++): string | null {
++  return cuil?.trim() || dni?.trim() || null;
++}
++
++// ── Edad ───────────────────────────────────────────────────────────────────
++
++export type Edad = { anios: number; meses: number; texto: string };
++
++// Años y meses cumplidos. No se carga a mano: sale de la fecha de nacimiento
++// y del día en que se mira la ficha.
++export function edadDe(
++  fechaNacimiento: string | null | undefined,
++  hoy: string = hoyIso()
++): Edad | null {
++  if (!fechaNacimiento || !/^\d{4}-\d{2}-\d{2}$/.test(fechaNacimiento)) return null;
++  if (fechaNacimiento > hoy) return null; // fecha futura: no hay edad que mostrar
++
++  const [anioNac, mesNac, diaNac] = fechaNacimiento.split("-").map(Number);
++  const [anioHoy, mesHoy, diaHoy] = hoy.split("-").map(Number);
++
++  let anios = anioHoy - anioNac;
++  let meses = mesHoy - mesNac;
++
++  // Todavía no llegó el día del mes: ese mes no está cumplido. La excepción
++  // es el nacido un 31 mirado en un mes que no tiene 31: el 28 de febrero ya
++  // cumplió el mes, y sin esto quedaría un mes corto.
++  if (diaHoy < diaNac) {
++    const ultimoDiaDelMes = new Date(anioHoy, mesHoy, 0).getDate();
++    const elMesNoLlegaAEseDia = diaNac > ultimoDiaDelMes && diaHoy === ultimoDiaDelMes;
++    if (!elMesNoLlegaAEseDia) meses -= 1;
++  }
++
++  if (meses < 0) {
++    anios -= 1;
++    meses += 12;
++  }
++
++  return { anios, meses, texto: textoEdad(anios, meses) };
++}
++
++function textoEdad(anios: number, meses: number): string {
++  const enAnios = anios === 1 ? "1 año" : `${anios} años`;
++  const enMeses = meses === 1 ? "1 mes" : `${meses} meses`;
++
++  if (anios === 0 && meses === 0) return "menos de un mes";
++  if (anios === 0) return enMeses;
++  if (meses === 0) return enAnios;
++  return `${enAnios} y ${enMeses}`;
++}
+diff --git a/src/lib/pdf/EvolucionDoc.tsx b/src/lib/pdf/EvolucionDoc.tsx
+index 0cb98b1..a82622b 100644
+--- a/src/lib/pdf/EvolucionDoc.tsx
++++ b/src/lib/pdf/EvolucionDoc.tsx
+@@ -6,6 +6,7 @@ import {
+   estilos,
+   type MetaImpresion,
+ } from "@/lib/pdf/comunes";
++import { documentoVisible, edadDe } from "@/lib/paciente-datos";
+ 
+ // La evolución sola: datos personales del paciente y, a continuación, las
+ // notas. Sin ficha de inicio ni acuerdo terapéutico.
+@@ -19,6 +20,8 @@ export type PacienteEvolucion = {
+   tipo: string;
+   fecha_nacimiento: string | null;
+   dni: string | null;
++  cuil: string | null;
++  obra_social: string | null;
+   to_nombre: string | null;
+ };
+ 
+@@ -66,6 +69,7 @@ export function EvolucionDoc({
+             nombre: paciente.nombre,
+             numero_registro: paciente.numero_registro,
+             dni: paciente.dni,
++            cuil: paciente.cuil,
+             fecha_nacimiento: paciente.fecha_nacimiento,
+           }}
+         />
+@@ -77,8 +81,11 @@ export function EvolucionDoc({
+         <View style={{ paddingLeft: 10 }}>
+           <Dato etiqueta="Apellido y nombre" valor={paciente.nombre} />
+           <Dato etiqueta="Nº de registro" valor={paciente.numero_registro} />
+-          <Dato etiqueta="DNI" valor={paciente.dni} />
++          <Dato etiqueta="CUIL" valor={documentoVisible(paciente.cuil, paciente.dni)} />
+           <Dato etiqueta="Fecha de nacimiento" valor={paciente.fecha_nacimiento} />
++          {/* La edad es la del día en que se imprime, no un dato guardado. */}
++          <Dato etiqueta="Edad" valor={edadDe(paciente.fecha_nacimiento)?.texto ?? null} />
++          <Dato etiqueta="Obra social" valor={paciente.obra_social} />
+           <Dato etiqueta="Tipo de ficha" valor={paciente.tipo} />
+           <Dato etiqueta="TO a cargo" valor={paciente.to_nombre} />
+         </View>
+diff --git a/src/lib/pdf/FichaInicioDoc.tsx b/src/lib/pdf/FichaInicioDoc.tsx
+index f4e2f13..67a5701 100644
+--- a/src/lib/pdf/FichaInicioDoc.tsx
++++ b/src/lib/pdf/FichaInicioDoc.tsx
+@@ -8,26 +8,19 @@ import {
+   type MetaImpresion,
+ } from "@/lib/pdf/comunes";
+ import { seccionesDe, tituloFicha, keyDeOpcion, type DatosFicha } from "@/lib/ficha-fields";
++import { documentoVisible, edadDe } from "@/lib/paciente-datos";
+ 
+ export type PacienteFicha = {
+   nombre: string;
+   numero_registro: string;
+   tipo: string;
+   dni: string | null;
++  cuil?: string | null;
++  obra_social?: string | null;
+   fecha_nacimiento: string | null;
+   to_nombre?: string | null;
+ };
+ 
+-function edad(fechaNacimiento: string | null): string {
+-  if (!fechaNacimiento) return "";
+-  const nacimiento = new Date(fechaNacimiento);
+-  const hoy = new Date();
+-  let años = hoy.getFullYear() - nacimiento.getFullYear();
+-  const mes = hoy.getMonth() - nacimiento.getMonth();
+-  if (mes < 0 || (mes === 0 && hoy.getDate() < nacimiento.getDate())) años--;
+-  return años >= 0 ? `${años} años` : "";
+-}
+-
+ function Dato({ etiqueta, valor }: { etiqueta: string; valor?: string | null }) {
+   return (
+     <Text style={estilos.item}>
+@@ -60,6 +53,7 @@ export function FichaInicioDoc({
+             nombre: paciente.nombre,
+             numero_registro: paciente.numero_registro,
+             dni: paciente.dni,
++            cuil: paciente.cuil,
+             fecha_nacimiento: paciente.fecha_nacimiento,
+           }}
+         />
+@@ -74,11 +68,12 @@ export function FichaInicioDoc({
+         <Dato etiqueta="Nombre y apellido" valor={paciente.nombre} />
+         <Dato
+           etiqueta="Fecha de nacimiento / Edad"
+-          valor={[paciente.fecha_nacimiento, edad(paciente.fecha_nacimiento)]
++          valor={[paciente.fecha_nacimiento, edadDe(paciente.fecha_nacimiento)?.texto]
+             .filter(Boolean)
+             .join("   ")}
+         />
+-        <Dato etiqueta="DNI" valor={paciente.dni} />
++        <Dato etiqueta="CUIL" valor={documentoVisible(paciente.cuil, paciente.dni)} />
++        <Dato etiqueta="Obra social" valor={paciente.obra_social} />
+         {paciente.to_nombre && <Dato etiqueta="Terapista Ocupacional" valor={paciente.to_nombre} />}
+ 
+         {secciones.map((seccion, i) => (
+diff --git a/src/lib/pdf/HistoriaClinicaDoc.tsx b/src/lib/pdf/HistoriaClinicaDoc.tsx
+index a627abb..64fda78 100644
+--- a/src/lib/pdf/HistoriaClinicaDoc.tsx
++++ b/src/lib/pdf/HistoriaClinicaDoc.tsx
+@@ -8,6 +8,7 @@ import {
+   type MetaImpresion,
+ } from "@/lib/pdf/comunes";
+ import { CAMPOS_ACUERDO, seccionesDe, type DatosFicha } from "@/lib/ficha-fields";
++import { documentoVisible, edadDe } from "@/lib/paciente-datos";
+ 
+ export type PacienteBackup = {
+   nombre: string;
+@@ -15,6 +16,8 @@ export type PacienteBackup = {
+   tipo: string;
+   fecha_nacimiento: string | null;
+   dni: string | null;
++  cuil?: string | null;
++  obra_social?: string | null;
+   ficha?: { datos: DatosFicha } | null;
+   acuerdo?: {
+     valor_sesion: number;
+@@ -39,7 +42,9 @@ function PacienteSection({ p }: { p: PacienteBackup }) {
+       <Text style={{ ...estilos.membreteCentrado, marginBottom: 6 }}>
+         Nº {p.numero_registro} · {p.tipo}
+         {p.fecha_nacimiento ? ` · Nace ${p.fecha_nacimiento}` : ""}
+-        {p.dni ? ` · DNI ${p.dni}` : ""}
++        {edadDe(p.fecha_nacimiento)?.texto ? ` · ${edadDe(p.fecha_nacimiento)!.texto}` : ""}
++        {documentoVisible(p.cuil, p.dni) ? ` · CUIL ${documentoVisible(p.cuil, p.dni)}` : ""}
++        {p.obra_social ? ` · ${p.obra_social}` : ""}
+       </Text>
+ 
+       <Text style={estilos.seccion}>Ficha de inicio</Text>
+@@ -149,6 +154,7 @@ export function HistoriaClinicaDoc({
+               nombre: p.nombre,
+               numero_registro: p.numero_registro,
+               dni: p.dni,
++              cuil: p.cuil,
+               fecha_nacimiento: p.fecha_nacimiento,
+             }}
+           />
+diff --git a/src/lib/pdf/comunes.tsx b/src/lib/pdf/comunes.tsx
+index 4f185dc..e4c0892 100644
+--- a/src/lib/pdf/comunes.tsx
++++ b/src/lib/pdf/comunes.tsx
+@@ -100,6 +100,7 @@ export type PacienteCabecera = {
+   nombre: string;
+   numero_registro: string;
+   dni?: string | null;
++  cuil?: string | null;
+   fecha_nacimiento?: string | null;
+ };
+ 
+@@ -122,7 +123,11 @@ export function CabeceraImpresion({
+               <Text style={estilos.cabeceraPaciente}>{paciente.nombre}</Text>
+               <Text style={estilos.cabeceraPacienteDatos}>
+                 Nº {paciente.numero_registro}
+-                {paciente.dni ? ` · DNI ${paciente.dni}` : ""}
++                {paciente.cuil
++                  ? ` · CUIL ${paciente.cuil}`
++                  : paciente.dni
++                    ? ` · DNI ${paciente.dni}`
++                    : ""}
+                 {paciente.fecha_nacimiento ? ` · Nace ${paciente.fecha_nacimiento}` : ""}
+               </Text>
+             </>
+diff --git a/src/lib/version.ts b/src/lib/version.ts
+index 05d79bd..80d99d7 100644
+--- a/src/lib/version.ts
++++ b/src/lib/version.ts
+@@ -1,3 +1,3 @@
+ // Version del sistema. Se muestra arriba a la derecha en el panel para
+ // poder confirmar de un vistazo que el despliegue tomo el codigo nuevo.
+-export const VERSION = "V014";
++export const VERSION = "V015";
+diff --git a/supabase/migrations/0020_paciente_cuil_obra_social.sql b/supabase/migrations/0020_paciente_cuil_obra_social.sql
+new file mode 100644
+index 0000000..8bec716
+--- /dev/null
++++ b/supabase/migrations/0020_paciente_cuil_obra_social.sql
+@@ -0,0 +1,19 @@
++-- Dos datos identificatorios que hasta ahora no tenían dónde ir.
++--
++-- `cuil`: el CUIL completo, con guiones, tal como se escribe —
++-- XX-XXXXXXXX-X. Los 8 dígitos del medio son el DNI, así que `dni` se sigue
++-- guardando por separado y derivado del CUIL. No es redundancia: el índice
++-- único `pacientes_dni_unico` y la detección de duplicados del alta trabajan
++-- sobre `dni`, y los pacientes ya cargados tienen DNI pero todavía no CUIL.
++-- Manteniendo los dos, lo viejo sigue funcionando y lo nuevo se completa
++-- cuando haya tiempo.
++--
++-- `obra_social`: la del paciente. No confundir con el estado de pago
++-- 'obra_social' de un turno, que es otra cosa: aquel dice cómo se cobra esa
++-- sesión, éste dice a qué financiadora pertenece la familia.
++
++alter table pacientes add column if not exists cuil text;
++alter table pacientes add column if not exists obra_social text;
++
++comment on column pacientes.cuil is 'CUIL con guiones: XX-XXXXXXXX-X. Los 8 del medio son el DNI.';
++comment on column pacientes.obra_social is 'Obra social o prepaga del paciente.';
+-- 
+2.43.0
+

@@ -1,0 +1,169 @@
+From 901fa43f942505db8bec66c60e7f3de95744e531 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Fri, 25 Sep 2026 13:19:31 +0000
+Subject: [PATCH] v017: la obra social tambien queda en manos de la TO
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Va junto con el CUIL, en el mismo bloque: son los dos datos que la TO le pide
+a la familia y los dos que hacen falta para facturar. La obra social ademas
+cambia seguido —una familia se cambia de prepaga, otra la pierde— y la TO es
+la que se entera primero.
+
+Dos detalles del guardado, que no son simetricos a proposito:
+
+La obra social se escribe siempre, incluso vacia: dejarla en blanco es la
+forma de borrarla cuando una familia deja de tenerla.
+
+El CUIL, en cambio, solo se toca si escribieron uno. Vacio significa "no lo
+cambio", no "borralo": de lo contrario, guardar la obra social de un paciente
+que ya tiene CUIL se lo llevaria puesto, y con el el DNI del que dependen la
+busqueda y el indice antiduplicados.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01EjnuJtuDoQQ273ZJ4WFYew
+---
+ src/app/panel/to/pacientes/[id]/page.tsx | 28 ++++++++++++-------
+ src/app/panel/to/pacientes/actions.ts    | 34 ++++++++++++++++--------
+ src/lib/version.ts                       |  2 +-
+ 3 files changed, 43 insertions(+), 21 deletions(-)
+
+diff --git a/src/app/panel/to/pacientes/[id]/page.tsx b/src/app/panel/to/pacientes/[id]/page.tsx
+index ec18087..874fd77 100644
+--- a/src/app/panel/to/pacientes/[id]/page.tsx
++++ b/src/app/panel/to/pacientes/[id]/page.tsx
+@@ -7,7 +7,7 @@ import { calcularDatosFaltantes } from "@/lib/datos-faltantes";
+ import { SECCIONES_PACIENTE } from "@/lib/paciente-vista";
+ import { BotonEnvio } from "@/components/ui/BotonEnvio";
+ import { actualizarDatosPaciente } from "@/app/panel/admin/pacientes/actions";
+-import { actualizarCuilPaciente } from "@/app/panel/to/pacientes/actions";
++import { actualizarDatosAdministrativos } from "@/app/panel/to/pacientes/actions";
+ import { documentoVisible, edadDe } from "@/lib/paciente-datos";
+ 
+ // Portada del paciente: sus datos y el acceso a cada parte de la historia.
+@@ -153,20 +153,19 @@ export default async function PortadaPaciente({
+           </details>
+         )}
+ 
+-        {/* La TO carga y corrige el CUIL de sus pacientes: es lo que pide en la
+-            primera sesión y lo que hace falta para facturar. El resto de los
+-            datos personales sigue siendo del admin. */}
++        {/* La TO carga y corrige el CUIL y la obra social de sus pacientes: son
++            los datos que pide en la primera sesión y los que hacen falta para
++            facturar. El resto sigue siendo del admin. */}
+         {usuario.rol === "to" && (
+           <details className="mt-4">
+             <summary className="cursor-pointer text-xs font-semibold text-blue-mid">
+-              {paciente.cuil ? "Corregir el CUIL" : "Cargar el CUIL"}
++              Cargar o corregir CUIL y obra social
+             </summary>
+-            <form action={actualizarCuilPaciente} className="mt-3 grid max-w-sm gap-2">
++            <form action={actualizarDatosAdministrativos} className="mt-3 grid max-w-sm gap-2">
+               <input type="hidden" name="paciente_id" value={id} />
+               <label className="text-xs font-semibold text-foreground/70">
+                 CUIL
+                 <input
+-                  required
+                   name="cuil"
+                   defaultValue={paciente.cuil ?? ""}
+                   placeholder="XX-XXXXXXXX-X"
+@@ -179,11 +178,22 @@ export default async function PortadaPaciente({
+                   </span>
+                 )}
+               </label>
++              <label className="text-xs font-semibold text-foreground/70">
++                Obra social
++                <input
++                  name="obra_social"
++                  defaultValue={paciente.obra_social ?? ""}
++                  placeholder="Obra social o prepaga"
++                  className="mt-1 w-full rounded-xl border border-black/10 px-3 py-2 text-sm outline-blue-mid"
++                />
++              </label>
+               <p className="text-xs text-foreground/60">
+-                Los otros datos personales los corrige la administración.
++                Dejá la obra social vacía si la familia no tiene. El nombre, la
++                fecha de nacimiento y el tipo de ficha los corrige la
++                administración.
+               </p>
+               <BotonEnvio variant="secondary" className="justify-self-start">
+-                Guardar CUIL
++                Guardar
+               </BotonEnvio>
+             </form>
+           </details>
+diff --git a/src/app/panel/to/pacientes/actions.ts b/src/app/panel/to/pacientes/actions.ts
+index 5412361..2333240 100644
+--- a/src/app/panel/to/pacientes/actions.ts
++++ b/src/app/panel/to/pacientes/actions.ts
+@@ -238,34 +238,46 @@ export async function crearPaciente(formData: FormData) {
+   redirect(`/panel/${usuario.rol}/pacientes/${paciente.id}`);
+ }
+ 
+-// El CUIL lo carga y lo corrige también la TO, no sólo el admin: es el dato
+-// que le piden a la familia en la primera sesión y el que hace falta para
+-// facturar, así que esperar a que lo cargue otro traba el trabajo del día.
++// El CUIL y la obra social los carga y los corrige también la TO, no sólo el
++// admin: son los datos que le pide a la familia en la primera sesión y los que
++// hacen falta para facturar. Esperar a que los cargue otro traba el trabajo
++// del día, y la obra social además cambia seguido — la TO es la que se entera.
+ //
+ // El resto de los datos personales —nombre, fecha de nacimiento, tipo de
+ // ficha— sigue siendo del admin: esos identifican la historia clínica.
+ //
+ // Qué paciente puede tocar cada TO no lo decide esta función: lo decide la
+ // policy `pacientes_write`, que en la base misma limita a cada TO a los suyos.
+-export async function actualizarCuilPaciente(formData: FormData) {
++export async function actualizarDatosAdministrativos(formData: FormData) {
+   const usuario = await requireRole("to", "admin");
+   const supabase = await createClient();
+ 
+   const paciente_id = String(formData.get("paciente_id"));
+   const cuilCrudo = String(formData.get("cuil") || "").trim();
+ 
+-  if (!cuilCrudo) throw new Error("Escribí el CUIL antes de guardar.");
++  // La obra social se escribe siempre: dejarla vacía es la forma de borrarla
++  // cuando una familia deja de tenerla.
++  const cambios: Record<string, string | null> = {
++    obra_social: String(formData.get("obra_social") || "").trim() || null,
++  };
+ 
+-  const cuil = normalizarCuil(cuilCrudo);
+-  if (!cuil) {
+-    throw new Error("El CUIL tiene que tener 11 dígitos, con el formato XX-XXXXXXXX-X.");
++  // El CUIL, en cambio, sólo se toca si escribieron uno. Vacío significa "no
++  // lo cambio", no "borralo": si no, guardar la obra social de un paciente que
++  // ya tiene CUIL se lo llevaría puesto.
++  if (cuilCrudo) {
++    const cuil = normalizarCuil(cuilCrudo);
++    if (!cuil) {
++      throw new Error("El CUIL tiene que tener 11 dígitos, con el formato XX-XXXXXXXX-X.");
++    }
++    cambios.cuil = cuil;
++    // El DNI se mantiene sincronizado con el CUIL: de él dependen la búsqueda
++    // y el índice que impide cargar dos veces al mismo paciente.
++    cambios.dni = dniDeCuil(cuil);
+   }
+ 
+-  // El DNI se mantiene sincronizado con el CUIL: de él dependen la búsqueda y
+-  // el índice que impide cargar dos veces al mismo paciente.
+   const { error } = await supabase
+     .from("pacientes")
+-    .update({ cuil, dni: dniDeCuil(cuil) })
++    .update(cambios)
+     .eq("id", paciente_id);
+ 
+   if (error) {
+diff --git a/src/lib/version.ts b/src/lib/version.ts
+index 3a1bb11..5f3668a 100644
+--- a/src/lib/version.ts
++++ b/src/lib/version.ts
+@@ -1,3 +1,3 @@
+ // Version del sistema. Se muestra arriba a la derecha en el panel para
+ // poder confirmar de un vistazo que el despliegue tomo el codigo nuevo.
+-export const VERSION = "V016";
++export const VERSION = "V017";
+-- 
+2.43.0
+

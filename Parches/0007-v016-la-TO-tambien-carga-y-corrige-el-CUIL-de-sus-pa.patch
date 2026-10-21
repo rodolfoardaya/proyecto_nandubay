@@ -1,0 +1,150 @@
+From f387ac8ef85bbfb8b3d9329777c6483c848b7c71 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Fri, 25 Sep 2026 13:14:46 +0000
+Subject: [PATCH] v016: la TO tambien carga y corrige el CUIL de sus pacientes
+
+El CUIL quedaba solo en manos del admin, junto con el resto de los datos
+personales. Pero es el dato que la TO le pide a la familia en la primera
+sesion y el que hace falta para facturar: tener que pedirselo a otro para
+cargarlo traba el trabajo del dia.
+
+Ahora la TO ve en la portada de su paciente un bloque propio, con el CUIL
+solo. Nombre, fecha de nacimiento y tipo de ficha siguen siendo del admin,
+porque identifican la historia clinica.
+
+No hace falta control de acceso nuevo: que cada TO alcance unicamente a sus
+pacientes lo decide la policy `pacientes_write` en la base, no la aplicacion.
+Y el DNI se sigue derivando del CUIL, asi que la busqueda y el indice
+antiduplicados quedan al dia con el mismo guardado.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01EjnuJtuDoQQ273ZJ4WFYew
+---
+ src/app/panel/to/pacientes/[id]/page.tsx | 37 +++++++++++++++++++
+ src/app/panel/to/pacientes/actions.ts    | 45 ++++++++++++++++++++++++
+ src/lib/version.ts                       |  2 +-
+ 3 files changed, 83 insertions(+), 1 deletion(-)
+
+diff --git a/src/app/panel/to/pacientes/[id]/page.tsx b/src/app/panel/to/pacientes/[id]/page.tsx
+index a9d1e8c..ec18087 100644
+--- a/src/app/panel/to/pacientes/[id]/page.tsx
++++ b/src/app/panel/to/pacientes/[id]/page.tsx
+@@ -7,6 +7,7 @@ import { calcularDatosFaltantes } from "@/lib/datos-faltantes";
+ import { SECCIONES_PACIENTE } from "@/lib/paciente-vista";
+ import { BotonEnvio } from "@/components/ui/BotonEnvio";
+ import { actualizarDatosPaciente } from "@/app/panel/admin/pacientes/actions";
++import { actualizarCuilPaciente } from "@/app/panel/to/pacientes/actions";
+ import { documentoVisible, edadDe } from "@/lib/paciente-datos";
+ 
+ // Portada del paciente: sus datos y el acceso a cada parte de la historia.
+@@ -151,6 +152,42 @@ export default async function PortadaPaciente({
+             </form>
+           </details>
+         )}
++
++        {/* La TO carga y corrige el CUIL de sus pacientes: es lo que pide en la
++            primera sesión y lo que hace falta para facturar. El resto de los
++            datos personales sigue siendo del admin. */}
++        {usuario.rol === "to" && (
++          <details className="mt-4">
++            <summary className="cursor-pointer text-xs font-semibold text-blue-mid">
++              {paciente.cuil ? "Corregir el CUIL" : "Cargar el CUIL"}
++            </summary>
++            <form action={actualizarCuilPaciente} className="mt-3 grid max-w-sm gap-2">
++              <input type="hidden" name="paciente_id" value={id} />
++              <label className="text-xs font-semibold text-foreground/70">
++                CUIL
++                <input
++                  required
++                  name="cuil"
++                  defaultValue={paciente.cuil ?? ""}
++                  placeholder="XX-XXXXXXXX-X"
++                  inputMode="numeric"
++                  className="mt-1 w-full rounded-xl border border-black/10 px-3 py-2 text-sm outline-blue-mid"
++                />
++                {!paciente.cuil && paciente.dni && (
++                  <span className="mt-1 block font-normal text-foreground/60">
++                    DNI cargado: {paciente.dni}
++                  </span>
++                )}
++              </label>
++              <p className="text-xs text-foreground/60">
++                Los otros datos personales los corrige la administración.
++              </p>
++              <BotonEnvio variant="secondary" className="justify-self-start">
++                Guardar CUIL
++              </BotonEnvio>
++            </form>
++          </details>
++        )}
+       </section>
+ 
+       {datosFaltantes.length > 0 && (
+diff --git a/src/app/panel/to/pacientes/actions.ts b/src/app/panel/to/pacientes/actions.ts
+index dc4f3ac..5412361 100644
+--- a/src/app/panel/to/pacientes/actions.ts
++++ b/src/app/panel/to/pacientes/actions.ts
+@@ -238,6 +238,51 @@ export async function crearPaciente(formData: FormData) {
+   redirect(`/panel/${usuario.rol}/pacientes/${paciente.id}`);
+ }
+ 
++// El CUIL lo carga y lo corrige también la TO, no sólo el admin: es el dato
++// que le piden a la familia en la primera sesión y el que hace falta para
++// facturar, así que esperar a que lo cargue otro traba el trabajo del día.
++//
++// El resto de los datos personales —nombre, fecha de nacimiento, tipo de
++// ficha— sigue siendo del admin: esos identifican la historia clínica.
++//
++// Qué paciente puede tocar cada TO no lo decide esta función: lo decide la
++// policy `pacientes_write`, que en la base misma limita a cada TO a los suyos.
++export async function actualizarCuilPaciente(formData: FormData) {
++  const usuario = await requireRole("to", "admin");
++  const supabase = await createClient();
++
++  const paciente_id = String(formData.get("paciente_id"));
++  const cuilCrudo = String(formData.get("cuil") || "").trim();
++
++  if (!cuilCrudo) throw new Error("Escribí el CUIL antes de guardar.");
++
++  const cuil = normalizarCuil(cuilCrudo);
++  if (!cuil) {
++    throw new Error("El CUIL tiene que tener 11 dígitos, con el formato XX-XXXXXXXX-X.");
++  }
++
++  // El DNI se mantiene sincronizado con el CUIL: de él dependen la búsqueda y
++  // el índice que impide cargar dos veces al mismo paciente.
++  const { error } = await supabase
++    .from("pacientes")
++    .update({ cuil, dni: dniDeCuil(cuil) })
++    .eq("id", paciente_id);
++
++  if (error) {
++    // 23505 es el índice único de 0014: ese documento ya está en otro paciente.
++    if (error.code === "23505") {
++      throw new Error(
++        "Ese documento ya figura en otro paciente activo. Revisá el listado antes de insistir: " +
++          "puede ser el mismo paciente cargado dos veces."
++      );
++    }
++    throw new Error(error.message);
++  }
++
++  revalidatePath(`/panel/${usuario.rol}/pacientes/${paciente_id}`);
++  revalidatePath(`/panel/${usuario.rol}/pacientes`);
++}
++
+ export async function actualizarFichaInicio(formData: FormData) {
+   const usuario = await requireRole("to", "admin");
+   const supabase = await createClient();
+diff --git a/src/lib/version.ts b/src/lib/version.ts
+index 80d99d7..3a1bb11 100644
+--- a/src/lib/version.ts
++++ b/src/lib/version.ts
+@@ -1,3 +1,3 @@
+ // Version del sistema. Se muestra arriba a la derecha en el panel para
+ // poder confirmar de un vistazo que el despliegue tomo el codigo nuevo.
+-export const VERSION = "V015";
++export const VERSION = "V016";
+-- 
+2.43.0
+
