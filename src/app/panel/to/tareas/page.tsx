@@ -17,14 +17,19 @@ export const metadata = { title: "Tareas y recordatorios — Ñandubay" };
 
 type Params = Promise<{ ver?: string; orden?: string }>;
 
+const TODOS: EstadoTarea[] = ["pendiente", "en_progreso", "completada"];
+
 export default async function Tareas({ searchParams }: { searchParams: Params }) {
   const usuario = await requireRole("to", "admin");
   const supabase = await createClient();
   const p = await searchParams;
 
-  const ver = (["pendiente", "en_progreso", "completada"] as const).includes(p.ver as EstadoTarea)
-    ? (p.ver as EstadoTarea)
-    : "todas";
+  // Se puede elegir más de un estado a la vez: viajan separados por coma en
+  // la dirección. Sin nada elegido se muestran todos.
+  const elegidos = (p.ver ?? "")
+    .split(",")
+    .filter((e): e is EstadoTarea => TODOS.includes(e as EstadoTarea));
+  const verTodas = elegidos.length === 0;
   // Por defecto lo que vence antes va primero: es el orden en que hay que
   // ocuparse de las cosas.
   const ascendente = p.orden !== "desc";
@@ -34,7 +39,7 @@ export default async function Tareas({ searchParams }: { searchParams: Params })
     .select("*")
     .order("fecha_limite", { ascending: ascendente })
     .order("hora_limite", { ascending: ascendente });
-  if (ver !== "todas") consulta = consulta.eq("estado", ver);
+  if (!verTodas) consulta = consulta.in("estado", elegidos);
 
   const { data: tareasRaw } = await consulta;
   const tareas = (tareasRaw ?? []) as Tarea[];
@@ -75,10 +80,15 @@ export default async function Tareas({ searchParams }: { searchParams: Params })
 
   const base = `/panel/${usuario.rol}/tareas`;
   const url = (extra: Record<string, string>) =>
-    `${base}?${new URLSearchParams({ ver, orden: ascendente ? "asc" : "desc", ...extra })}`;
+    `${base}?${new URLSearchParams({ ver: elegidos.join(","), orden: ascendente ? "asc" : "desc", ...extra })}`;
 
-  const FILTROS = [
-    { valor: "todas", label: "Todas" },
+  // Cada botón suma o quita su estado de la selección, sin tocar los demás.
+  const alternar = (estado: EstadoTarea) =>
+    elegidos.includes(estado)
+      ? elegidos.filter((e) => e !== estado)
+      : [...elegidos, estado];
+
+  const FILTROS: { valor: EstadoTarea; label: string }[] = [
     { valor: "pendiente", label: "Pendientes" },
     { valor: "en_progreso", label: "En progreso" },
     { valor: "completada", label: "Completadas" },
@@ -100,18 +110,32 @@ export default async function Tareas({ searchParams }: { searchParams: Params })
         </div>
       </div>
 
+      {/* Se puede elegir más de un estado: cada botón suma o quita el suyo.
+          "Todas" limpia la selección. */}
       <div className="mt-4 flex flex-wrap gap-1 text-sm">
-        {FILTROS.map((f) => (
-          <Link
-            key={f.valor}
-            href={url({ ver: f.valor })}
-            className={`rounded-full px-3 py-1.5 font-semibold ${
-              f.valor === ver ? "bg-green-mid text-white" : "border border-black/10"
-            }`}
-          >
-            {f.label}
-          </Link>
-        ))}
+        <Link
+          href={url({ ver: "" })}
+          className={`rounded-full px-3 py-1.5 font-semibold ${
+            verTodas ? "bg-green-mid text-white" : "border border-black/10"
+          }`}
+        >
+          Todas
+        </Link>
+        {FILTROS.map((f) => {
+          const activo = elegidos.includes(f.valor);
+          return (
+            <Link
+              key={f.valor}
+              href={url({ ver: alternar(f.valor).join(",") })}
+              className={`rounded-full px-3 py-1.5 font-semibold ${
+                activo ? "bg-green-mid text-white" : "border border-black/10"
+              }`}
+            >
+              {activo ? "✓ " : ""}
+              {f.label}
+            </Link>
+          );
+        })}
       </div>
 
       {tareas.length === 0 ? (
