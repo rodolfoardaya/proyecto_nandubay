@@ -85,7 +85,7 @@ export async function GET(request: NextRequest) {
   const { data } = await supabase
     .from("turnos_seguimiento")
     .select(
-      "fecha, asistencia, pago, observacion_asistencia, observacion_pago, turnos(hora, pacientes(nombre), tos(nombre))"
+      "fecha, asistencia, pago, observacion_asistencia, observacion_pago, turnos(hora, valor_sesion, pacientes(nombre), tos(nombre))"
     )
     .gte("fecha", desde)
     .lte("fecha", hasta)
@@ -95,22 +95,39 @@ export async function GET(request: NextRequest) {
 
   const aFila = (s: Record<string, unknown>, campoObs: string): FilaSeguimiento => {
     const t = s.turnos as
-      | { hora?: string; pacientes?: { nombre?: string }; tos?: { nombre?: string } }
+      | {
+          hora?: string;
+          valor_sesion?: number | string | null;
+          pacientes?: { nombre?: string };
+          tos?: { nombre?: string };
+        }
       | null;
+    const valor = t?.valor_sesion == null ? null : Number(t.valor_sesion);
     return {
       fecha: String(s.fecha),
       hora: t?.hora ? aHHMM(t.hora) : "—",
       paciente: t?.pacientes?.nombre ?? "—",
-      to: t?.tos?.nombre ?? "—",
+      valor: Number.isFinite(valor as number) ? (valor as number) : null,
       observacion: (s[campoObs] as string) ?? null,
     };
   };
+
+  const nombresTo = [
+    ...new Set(
+      filas
+        .map((s) => (s.turnos as { tos?: { nombre?: string } } | null)?.tos?.nombre)
+        .filter((n): n is string => !!n)
+    ),
+  ];
+  const toNombre = nombresTo.length === 1 ? nombresTo[0] : undefined;
 
   const bloques: BloqueReporte[] = pedidas.map((clave) => {
     const v = VARIABLES[clave];
     return {
       titulo: v.titulo,
       vacio: v.vacio,
+      // El valor y el total sólo tienen sentido en los bloques de cobro.
+      conValor: v.campo === "pago",
       filas: filas.filter((s) => s[v.campo] === v.valor).map((s) => aFila(s, v.obs)),
     };
   });
@@ -125,6 +142,7 @@ export async function GET(request: NextRequest) {
       bloques={bloques}
       desde={desde}
       hasta={hasta}
+      toNombre={toNombre}
       meta={metaImpresion(usuario.nombre)}
     />
   );
